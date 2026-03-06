@@ -1,0 +1,1471 @@
+﻿import streamlit as st
+import streamlit.components.v1 as components
+import requests
+import json
+from pathlib import Path
+
+
+# Zentrale Tabelle fuer B.2: Fahrzeugtyp -> Distanzklasse -> (min, mittel, max) in EUR/km
+RATE_TABLE = {
+    "Transporter / Sprinter": {
+        "kurz": {"min": 1.10, "mittel": 1.30, "max": 1.50},
+        "mittel": {"min": 0.80, "mittel": 1.10, "max": 1.40},
+        "lang": {"min": 0.80, "mittel": 1.00, "max": 1.20},
+    },
+    "XXL / Planensprinter": {
+        "kurz": {"min": 1.30, "mittel": 1.50, "max": 1.70},
+        "mittel": {"min": 1.00, "mittel": 1.30, "max": 1.60},
+        "lang": {"min": 1.10, "mittel": 1.20, "max": 1.40},
+    },
+    "7,5 to": {
+        "kurz": {"min": 3.00, "mittel": 3.50, "max": 4.00},
+        "mittel": {"min": 2.75, "mittel": 3.00, "max": 3.75},
+        "lang": {"min": 2.00, "mittel": 2.50, "max": 3.00},
+    },
+    "12 to": {
+        "kurz": {"min": 3.80, "mittel": 4.50, "max": 5.00},
+        "mittel": {"min": 3.50, "mittel": 4.00, "max": 4.50},
+        "lang": {"min": 2.80, "mittel": 3.20, "max": 3.80},
+    },
+}
+
+PARCEL_CONFIG_PATH = Path(__file__).with_name("parcel_tariffs_de.json")
+
+ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
+ORS_DIRECTIONS_URL_TEMPLATE = "https://api.openrouteservice.org/v2/directions/{profile}"
+DEFAULT_ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImQ1MGM5OGU2YTc2NTQ1MDFhZWFhZjBiOGJhYzRkOGU0IiwiaCI6Im11cm11cjY0In0="
+ORS_PROFILE_LABELS = {
+    "driving-car": "PKW (driving-car)",
+    "driving-hgv": "LKW (driving-hgv)",
+    "cycling-regular": "Fahrrad (cycling-regular)",
+    "foot-walking": "Zu Fuß (foot-walking)",
+}
+VEHICLE_TO_ORS_PROFILE = {
+    "Transporter / Sprinter": "driving-car",
+    "XXL / Planensprinter": "driving-car",
+    "7,5 to": "driving-hgv",
+    "12 to": "driving-hgv",
+}
+ORS_PROFILE_TO_VEHICLE = {
+    "driving-car": "Transporter / Sprinter",
+    "driving-hgv": "7,5 to",
+    "cycling-regular": "Transporter / Sprinter",
+    "foot-walking": "Transporter / Sprinter",
+}
+
+
+def sync_b_profile_from_vehicle():
+    """Synchronisiert ORS-Profil aus Fahrzeugtyp in Modus B."""
+    vehicle_type = st.session_state.get("b_vehicle_type")
+    mapped_profile = VEHICLE_TO_ORS_PROFILE.get(vehicle_type, "driving-car")
+    st.session_state["b_ors_profile"] = mapped_profile
+
+
+def sync_b_vehicle_from_profile():
+    """Synchronisiert Fahrzeugtyp aus ORS-Profil in Modus B."""
+    profile = st.session_state.get("b_ors_profile")
+    mapped_vehicle = ORS_PROFILE_TO_VEHICLE.get(profile, "Transporter / Sprinter")
+    st.session_state["b_vehicle_type"] = mapped_vehicle
+
+
+def geocode_with_ors(address, api_key):
+    """Liefert [lon, lat] fuer eine Adresse via ORS Geocoder."""
+    response = requests.get(
+        ORS_GEOCODE_URL,
+        params={"api_key": api_key, "text": address, "size": 1},
+        timeout=20,
+    )
+    response.raise_for_status()
+    data = response.json()
+    features = data.get("features", [])
+    if not features:
+        raise ValueError(f"Adresse nicht gefunden: {address}")
+    return features[0]["geometry"]["coordinates"]
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_ors_address_suggestions(query, api_key):
+    """Liefert bis zu 5 Adressvorschlaege fuer Autocomplete."""
+    if not query or len(query.strip()) < 3:
+        return []
+    response = requests.get(
+        ORS_GEOCODE_URL,
+        params={"api_key": api_key, "text": query.strip(), "size": 5},
+        timeout=20,
+    )
+    response.raise_for_status()
+    data = response.json()
+    features = data.get("features", [])
+    suggestions = []
+    for feature in features:
+        props = feature.get("properties", {})
+        label = props.get("label")
+        if label:
+            suggestions.append(label)
+    # Reihenfolge behalten, Duplikate entfernen
+    seen = set()
+    deduped = []
+    for item in suggestions:
+        if item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
+
+
+def address_input_with_autofill(label, query_key, api_key):
+    """Ein Eingabefeld + klickbare Vorschlaege darunter."""
+    pending_key = f"{query_key}__pending"
+    if pending_key in st.session_state:
+        st.session_state[query_key] = st.session_state[pending_key]
+        del st.session_state[pending_key]
+
+    query = st.text_input(label, key=query_key)
+    selected = query.strip()
+
+    if api_key and len(selected) >= 3:
+        try:
+            suggestions = get_ors_address_suggestions(selected, api_key)
+        except Exception:
+            suggestions = []
+
+        if suggestions:
+            st.caption(f"Vorschlaege fuer {label}:")
+            shown = suggestions[:5]
+            cols = st.columns(len(shown))
+            for i, suggestion in enumerate(shown):
+                with cols[i]:
+                    if st.button(suggestion, key=f"{query_key}_sugg_{i}"):
+                        st.session_state[pending_key] = suggestion
+                        st.rerun()
+
+    return st.session_state.get(query_key, selected).strip()
+
+
+def get_ors_distance_and_duration(start_address, target_address, api_key, profile):
+    """Berechnet Distanz (km) und Dauer (Minuten) via ORS Directions."""
+    start_coords = geocode_with_ors(start_address, api_key)
+    target_coords = geocode_with_ors(target_address, api_key)
+
+    response = requests.post(
+        ORS_DIRECTIONS_URL_TEMPLATE.format(profile=profile),
+        json={"coordinates": [start_coords, target_coords]},
+        headers={"Authorization": api_key},
+        timeout=25,
+    )
+    response.raise_for_status()
+    data = response.json()
+    routes = data.get("routes", [])
+    if not routes:
+        raise ValueError("Keine Route von ORS erhalten.")
+
+    summary = routes[0]["summary"]
+    distance_km = summary["distance"] / 1000
+    duration_minutes = summary["duration"] / 60
+    return distance_km, duration_minutes
+
+
+def format_eur(value):
+    """Formatiert Zahlen als Euro mit 2 Nachkommastellen."""
+    return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def format_eur_per_km(value, km):
+    """Formatiert den resultierenden Preis pro km."""
+    if km <= 0:
+        return "- €/km (bei 0 km nicht berechenbar)"
+    per_km = value / km
+    return (
+        f"{per_km:,.2f} €/km".replace(",", "X").replace(".", ",").replace("X", ".")
+    )
+
+
+def render_confidence_box(min_price, max_price, caption):
+    """Zeigt Preis-Confidence auf Basis der Spanne."""
+    span = max_price - min_price
+    mid = (min_price + max_price) / 2 if (min_price + max_price) > 0 else 0
+    span_pct = (span / mid * 100) if mid > 0 else 0
+
+    if span_pct <= 8:
+        level = "Hoch"
+        tone = "success"
+        hint = "Preise liegen eng zusammen. Hohe Sicherheit."
+    elif span_pct <= 18:
+        level = "Mittel"
+        tone = "warning"
+        hint = "Normale Streuung. Kurz plausibilisieren."
+    else:
+        level = "Niedrig"
+        tone = "error"
+        hint = "Große Spreizung. Besser gemeinsam abstimmen."
+
+    st.markdown("**Preis-Confidence**")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Confidence", level)
+    c2.metric("Spanne", format_eur(span))
+    c3.metric("Relative Spanne", f"{span_pct:.1f} %")
+    if tone == "success":
+        st.success(f"{caption}: {hint}")
+    elif tone == "warning":
+        st.warning(f"{caption}: {hint}")
+    else:
+        st.error(f"{caption}: {hint}")
+
+
+def render_case_c_recommendation(exp_result, lz48_result):
+    """Zeigt C-spezifische Empfehlung statt generischer Confidence."""
+    if exp_result is None and lz48_result is None:
+        st.warning("Keine Paketoption moeglich. Bitte anderen Transportmodus waehlen.")
+        return
+    if exp_result is None:
+        st.warning("Nur LZ48 ist moeglich. EXP ist ausgeschlossen.")
+        return
+    if lz48_result is None:
+        st.info("Nur EXP ist moeglich. LZ48 ist ausgeschlossen.")
+        return
+
+    exp_price = exp_result["total"]
+    lz48_price = lz48_result["total"]
+    diff = abs(exp_price - lz48_price)
+    ref = min(exp_price, lz48_price) if min(exp_price, lz48_price) > 0 else 1.0
+    diff_pct = (diff / ref) * 100
+
+    st.markdown("**Tarif-Empfehlung (C-Modell)**")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Preisunterschied", format_eur(diff))
+    r2.metric("Relativer Unterschied", f"{diff_pct:.1f} %")
+    cheaper = "EXP" if exp_price < lz48_price else "LZ48"
+    r3.metric("Guenstiger", cheaper)
+
+    if diff_pct >= 25:
+        st.success(
+            "Großer Preisunterschied: beide Tarife aktiv anbieten (Kunde kann zwischen Preis und Service waehlen)."
+        )
+    elif diff_pct <= 10:
+        st.warning(
+            "Niedriger Preisunterschied: LZ48 verliert als langsameres Produkt. EXP priorisiert anbieten."
+        )
+    else:
+        st.info(
+            "Mittlerer Preisunterschied: EXP als Standard nennen, LZ48 optional als Preisalternative erwaehnen."
+        )
+
+
+def render_copy_price(label, value, key):
+    """Zeigt empfohlenen Preis inkl. Copy-Button."""
+    formatted = format_eur(value)
+    formatted_net = formatted.replace(" €", "")
+    offer_text = (
+        "Nochmals vielen Dank für Ihre Anfrage.\n\n"
+        f"Gerne bieten wir Ihnen an: {formatted_net} EUR netto.\n\n"
+        "Über eine Beauftragung würden wir uns sehr freuen."
+    )
+    js_price = formatted.replace("\\", "\\\\").replace('"', '\\"')
+    js_offer = (
+        offer_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    )
+
+    st.markdown(f"**{label}: {formatted}**")
+    components.html(
+        f"""
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button id="copy_btn_{key}" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;">Preis kopieren</button>
+            <button id="copy_text_btn_{key}" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;">Text kopieren</button>
+        </div>
+        <script>
+        const btn = document.getElementById("copy_btn_{key}");
+        const textBtn = document.getElementById("copy_text_btn_{key}");
+        btn.addEventListener("click", async () => {{
+            await navigator.clipboard.writeText("{js_price}");
+            const oldText = btn.innerText;
+            btn.innerText = "Kopiert";
+            setTimeout(() => btn.innerText = oldText, 1200);
+        }});
+        textBtn.addEventListener("click", async () => {{
+            await navigator.clipboard.writeText("{js_offer}");
+            const oldText = textBtn.innerText;
+            textBtn.innerText = "Kopiert";
+            setTimeout(() => textBtn.innerText = oldText, 1200);
+        }});
+        </script>
+        """,
+        height=52,
+    )
+    st.caption(offer_text)
+    st.caption("Direkt nutzbar fuer Mail, Bamboo und Angebot.")
+
+
+def get_distance_class(km):
+    """Ordnet die Distanzklasse gemäß MVP-Regeln zu."""
+    if km < 100:
+        return "kurz"
+    if km <= 250:
+        return "mittel"
+    return "lang"
+
+
+def calculate_case_a(km, one_way_minutes):
+    """Berechnet dynamische Unter-/Obergrenze, Mittelwert und Gesamtminuten fuer Fall A."""
+    price_a1 = 29 + (1.30 * km)
+    total_minutes = (2 * one_way_minutes) + 30
+    price_a2 = (total_minutes / 60) * 60
+
+    lower_price = min(price_a1, price_a2)
+    upper_price = max(price_a1, price_a2)
+    price_mid = (lower_price + upper_price) / 2
+
+    return lower_price, price_mid, upper_price, total_minutes, price_a1, price_a2
+
+
+def calculate_case_b_ek(ek_price):
+    """Berechnet die drei EK-basierten Verkaufspreise fuer Fall B.1."""
+    return {
+        "EK x 1,3": ek_price * 1.3,
+        "EK x 1,4": ek_price * 1.4,
+        "EK x 1,5": ek_price * 1.5,
+    }
+
+
+def calculate_case_b_table(km, vehicle_type):
+    """Berechnet Distanzklasse, Satzwerte und Preise fuer Fall B.2."""
+    distance_class = get_distance_class(km)
+    rates = RATE_TABLE[vehicle_type][distance_class]
+    prices = {
+        "Tabellen-Min": km * rates["min"],
+        "Tabellen-Mittel": km * rates["mittel"],
+        "Tabellen-Max": km * rates["max"],
+    }
+    return distance_class, rates, prices
+
+
+@st.cache_data(ttl=120)
+def load_parcel_config():
+    """Laedt externe Tarifkonfiguration fuer Modus C."""
+    with PARCEL_CONFIG_PATH.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def get_weight_price(weight_kg, tariff_rows):
+    """Liefert Grundpreis je Paket fuer das passende Gewichtsband."""
+    for row in tariff_rows:
+        if weight_kg <= float(row["max_weight_kg"]):
+            return float(row["price_eur"]), float(row["max_weight_kg"])
+    return None, None
+
+
+def get_piece_metrics(cfg, piece):
+    """Berechnet Real-/Volumen-/Abrechnungsgewicht und Gurtmass je Packstueck."""
+    real_weight = float(piece["weight_kg"])
+    volume_weight = (
+        float(piece["length_cm"]) * float(piece["width_cm"]) * float(piece["height_cm"])
+    ) / float(cfg["calculation_rules"]["volumetric_divisor_cm3_per_kg"])
+    if cfg["calculation_rules"]["use_higher_of_real_and_volumetric_weight"]:
+        billable_weight = max(real_weight, volume_weight)
+    else:
+        billable_weight = real_weight
+    girth_plus_length = (
+        float(piece["length_cm"]) + 2 * float(piece["width_cm"]) + 2 * float(piece["height_cm"])
+    )
+    return {
+        "real_weight": real_weight,
+        "volume_weight": volume_weight,
+        "billable_weight": billable_weight,
+        "girth_plus_length": girth_plus_length,
+    }
+
+
+def normalize_postal_code(value):
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    return digits[:5]
+
+
+def postal_matches_patterns(postal_code, patterns):
+    if not postal_code or len(postal_code) < 5:
+        return False
+    postal_int = int(postal_code)
+
+    for prefix in patterns.get("prefix_x", []):
+        if postal_code.startswith(str(prefix)):
+            return True
+    for start, end in patterns.get("ranges", []):
+        if int(start) <= postal_int <= int(end):
+            return True
+    for exact in patterns.get("exact", []):
+        if postal_int == int(exact):
+            return True
+    return False
+
+
+def determine_pickup_area(cfg, pickup_postal_code):
+    rules = cfg.get("pickup_area_rules", {})
+    plz = normalize_postal_code(pickup_postal_code)
+    if len(plz) != 5:
+        return None
+    if postal_matches_patterns(plz, rules.get("A", {}).get("postal_patterns", {})):
+        return "A"
+    if postal_matches_patterns(plz, rules.get("B", {}).get("postal_patterns", {})):
+        return "B"
+    return "C"
+
+
+def evaluate_shipment_eligibility(cfg, country_code, pieces, is_pallet, is_non_parcel):
+    """Globale Pruefung fuer Modus C (unabhaengig vom Carrier)."""
+    rules = cfg["validation_rules"]
+    blocking = []
+    warnings = []
+
+    if country_code not in rules["allowed_destination_countries"]:
+        blocking.append("Nur innerdeutsche Sendungen (DE) sind in Modus C erlaubt.")
+    if is_pallet:
+        blocking.append("Palettensendung erkannt - bitte anderen Transportmodus nutzen.")
+    if is_non_parcel:
+        blocking.append("Nicht pakettaugliche Sendung - bitte anderen Transportmodus nutzen.")
+
+    max_weight = float(rules["max_weight_kg"])
+    for idx, piece in enumerate(pieces, start=1):
+        metrics = get_piece_metrics(cfg, piece)
+        if metrics["billable_weight"] > max_weight:
+            blocking.append(
+                f"Packstueck {idx}: Abrechnungsgewicht {metrics['billable_weight']:.1f} kg ueber globalem Limit {max_weight:.1f} kg."
+            )
+    return blocking, warnings
+
+
+def evaluate_carrier_eligibility(cfg, tariff_code, pieces, selected_exp_services=None):
+    """Carrier-spezifische Dealbreaker, bereits ein einzelnes Packstueck kann ausschliessen."""
+    rules = cfg["carrier_validation_rules"][tariff_code]
+    reasons = []
+    max_weight = float(rules["max_weight_kg"])
+    max_length = float(rules["max_length_cm"])
+    max_lu = float(rules["max_girth_plus_length_cm"])
+
+    for idx, piece in enumerate(pieces, start=1):
+        metrics = get_piece_metrics(cfg, piece)
+        lu = metrics["girth_plus_length"]
+        if metrics["billable_weight"] > max_weight:
+            reasons.append(
+                f"Packstueck {idx}: Abrechnungsgewicht {metrics['billable_weight']:.1f} kg > {max_weight:.1f} kg"
+            )
+        if piece["length_cm"] > max_length:
+            reasons.append(
+                f"Packstueck {idx}: Laenge {piece['length_cm']:.1f} cm > {max_length:.1f} cm"
+            )
+        if lu > max_lu:
+            reasons.append(
+                f"Packstueck {idx}: Laenge+Umfang {lu:.1f} cm > {max_lu:.1f} cm"
+            )
+
+    if tariff_code == "EXP":
+        exp_cfg = cfg.get("carrier_specific_surcharges", {}).get("EXP", {})
+        if exp_cfg.get("overlength_over_350_quote_only"):
+            for idx, piece in enumerate(pieces, start=1):
+                if float(piece["length_cm"]) > 350.0:
+                    reasons.append(
+                        f"Packstueck {idx}: Laenge > 350 cm nur mit Tarifanfrage/Freigabe."
+                    )
+        if exp_cfg.get("girth_over_500_requires_approval"):
+            for idx, piece in enumerate(pieces, start=1):
+                metrics = get_piece_metrics(cfg, piece)
+                if metrics["girth_plus_length"] > 500.0:
+                    reasons.append(
+                        f"Packstueck {idx}: Gurtmass > 500 cm nur mit Freigabe/Tarifinfo vorab."
+                    )
+        if selected_exp_services:
+            svc_cfg = exp_cfg.get("extra_services", {})
+            for service_key in selected_exp_services:
+                service = svc_cfg.get(service_key)
+                if service and service.get("quote_only"):
+                    reasons.append(
+                        f"Zusatzservice '{service['label']}' ist Preis auf Anfrage."
+                    )
+    return reasons
+
+
+def calculate_insurance_fee(cfg, declared_goods_value_eur):
+    logic = cfg["insurance_logic"]
+    included = float(logic["included_value_eur"])
+    if declared_goods_value_eur <= included:
+        return 0.0
+    over_value = declared_goods_value_eur - included
+    fee = over_value * (float(logic["rate_pct_over_included"]) / 100.0)
+    fee = max(fee, float(logic["min_fee_eur"]))
+    fee = min(fee, float(logic["max_fee_eur"]))
+    return fee
+
+
+def calculate_case_c_tariff(
+    cfg,
+    tariff_code,
+    pieces,
+    selected_services,
+    pickup_timing,
+    declared_goods_value_eur,
+    selected_exp_services=None,
+    late_pickup_ctx=None,
+    insurance_enabled=False,
+):
+    tariff = cfg["tariffs"][tariff_code]
+    base_total = 0.0
+    matched_bands = []
+    piece_metrics_list = []
+    for piece in pieces:
+        piece_metrics = get_piece_metrics(cfg, piece)
+        piece_metrics_list.append(piece_metrics)
+        base_per_piece, matched_band = get_weight_price(
+            piece_metrics["billable_weight"], tariff["ground_rates_by_weight_band"]
+        )
+        if base_per_piece is None:
+            return None
+        base_total += base_per_piece
+        matched_bands.append(matched_band)
+
+    parcel_count = len(pieces)
+    fuel_pct = float(tariff["service_surcharges"].get("fuel_surcharge_pct", 0.0))
+    fuel_amount = base_total * (fuel_pct / 100.0)
+
+    extras_total = 0.0
+    extras_breakdown = []
+    services_cfg = cfg["extra_delivery_services"]
+    for service_key in selected_services:
+        service = services_cfg[service_key]
+        applies_to = service.get("applies_to", ["EXP", "LZ48"])
+        if tariff_code not in applies_to:
+            continue
+        price = float(service["price_eur"])
+        if service["applies_per"] == "parcel":
+            amount = price * parcel_count
+        else:
+            amount = price
+        extras_total += amount
+        extras_breakdown.append((service["label"], amount))
+
+    if tariff_code == "EXP" and selected_exp_services:
+        exp_cfg = cfg.get("carrier_specific_surcharges", {}).get("EXP", {})
+        svc_cfg = exp_cfg.get("extra_services", {})
+        for service_key in selected_exp_services:
+            service = svc_cfg.get(service_key)
+            if not service or service.get("quote_only"):
+                continue
+            price = float(service["price_eur"])
+            if service.get("applies_per") == "parcel":
+                amount = price * parcel_count
+            else:
+                amount = price
+            extras_total += amount
+            extras_breakdown.append((f"EXP Service - {service['label']}", amount))
+
+    late_cfg = cfg["late_fees"].get(
+        pickup_timing, {"label": "Standardanmeldung (bis Cutoff)", "price_eur": 0.0}
+    )
+    late_fee = float(late_cfg["price_eur"])
+    late_pickup_fee = 0.0
+    late_pickup_label = None
+    pickup_area_fee = 0.0
+    pickup_area_label = None
+
+    if late_pickup_ctx is None:
+        late_pickup_ctx = {}
+
+    pickup_area = late_pickup_ctx.get("pickup_area")
+    shipment_count = int(late_pickup_ctx.get("shipment_count", 1))
+    area_rules = cfg.get("pickup_area_rules", {})
+    if pickup_area in area_rules:
+        area_rule = area_rules[pickup_area]
+        base_area_fee = float(area_rule.get("base_fee_eur", 0.0))
+        if pickup_area == "B":
+            threshold_map = area_rule.get("waiver_threshold_shipments", {})
+            threshold = int(threshold_map.get(tariff_code, 9999))
+            if shipment_count >= threshold:
+                base_area_fee = 0.0
+        pickup_area_fee = base_area_fee
+        if pickup_area_fee > 0:
+            pickup_area_label = f"Abholgebiet {pickup_area}"
+    late_rules = cfg.get("late_pickup_rules", {})
+    applies_to = late_rules.get("applies_to", [])
+    if tariff_code in applies_to and late_pickup_ctx.get("is_late_registration", False):
+        area = late_pickup_ctx.get("pickup_area", "A")
+        window_label = late_pickup_ctx.get("pickup_window")
+        additional_shipments = int(late_pickup_ctx.get("additional_shipments", 0))
+        self_dropoff_after_19 = bool(late_pickup_ctx.get("self_dropoff_after_19", False))
+        reg_fees = late_rules.get("late_registration_fee_by_area_eur", {})
+        late_fee = float(reg_fees.get(area, late_fee))
+        late_cfg = {"label": f"Spaetanmeldung Gebiet {area}", "price_eur": late_fee}
+
+        for row in late_rules.get("time_window_fees", []):
+            if row["label"] == window_label:
+                if area == "A":
+                    late_pickup_fee = float(row["fee_area_a_eur"])
+                else:
+                    late_pickup_fee = float(row["fee_area_b_eur"])
+                break
+
+        late_pickup_fee += float(late_rules.get("additional_shipment_fee_eur", 0.0)) * max(
+            0, additional_shipments
+        )
+
+        if area == "A" and self_dropoff_after_19:
+            late_pickup_fee = max(
+                0.0,
+                late_pickup_fee
+                - float(late_rules.get("self_dropoff_after_19_discount_area_a_eur", 0.0)),
+            )
+        late_pickup_label = f"Spaetabholung Gebiet {area} ({window_label})"
+
+    over = cfg["oversized_shipment_surcharges"]
+    oversize_count = 0
+    for piece, piece_metrics in zip(pieces, piece_metrics_list):
+        lu = piece_metrics["girth_plus_length"]
+        if (
+            piece_metrics["billable_weight"] > float(over["weight_over_kg"])
+            or piece["length_cm"] > float(over["length_over_cm"])
+            or lu > float(over["girth_plus_length_over_cm"])
+        ):
+            oversize_count += 1
+
+    oversize_fee = 0.0
+    if oversize_count > 0:
+        if over["applies_per"] == "parcel":
+            oversize_fee = float(over["surcharge_eur"]) * oversize_count
+        else:
+            oversize_fee = float(over["surcharge_eur"])
+
+    carrier_surcharge_total = 0.0
+    carrier_surcharge_breakdown = []
+    carrier_surcharges = cfg.get("carrier_specific_surcharges", {}).get(tariff_code, {})
+
+    if tariff_code == "LZ48":
+        over_25_50 = float(
+            carrier_surcharges.get("over_25_to_50_kg_surcharge_eur_per_piece", 0.0)
+        )
+        if over_25_50 > 0:
+            count_25_50 = sum(
+                1
+                for metrics in piece_metrics_list
+                if metrics["billable_weight"] > 25.0 and metrics["billable_weight"] <= 50.0
+            )
+            if count_25_50 > 0:
+                amount = over_25_50 * count_25_50
+                carrier_surcharge_total += amount
+                carrier_surcharge_breakdown.append(("LZ48 >25kg bis 50kg", amount))
+
+        long_threshold = float(
+            carrier_surcharges.get("long_piece_threshold_length_cm", 9999.0)
+        )
+        long_fee = float(
+            carrier_surcharges.get("long_piece_surcharge_eur_per_piece", 0.0)
+        )
+        if long_fee > 0:
+            long_count = sum(
+                1 for piece in pieces if float(piece["length_cm"]) > long_threshold
+            )
+            if long_count > 0:
+                amount = long_fee * long_count
+                carrier_surcharge_total += amount
+                carrier_surcharge_breakdown.append(("Laengenzuschlag", amount))
+
+    if tariff_code == "EXP":
+        non_conv_50 = float(
+            carrier_surcharges.get("non_conveyable_over_50kg_surcharge_eur_per_piece", 0.0)
+        )
+        non_conv_100 = float(
+            carrier_surcharges.get("non_conveyable_over_100kg_surcharge_eur_per_piece", 0.0)
+        )
+        extra_per_kg_over_100 = float(
+            carrier_surcharges.get("over_100kg_additional_eur_per_kg", 0.0)
+        )
+        for metrics in piece_metrics_list:
+            if metrics["billable_weight"] > 100 and non_conv_100 > 0:
+                amount = non_conv_100 + (
+                    (metrics["billable_weight"] - 100.0) * extra_per_kg_over_100
+                )
+                carrier_surcharge_total += amount
+                carrier_surcharge_breakdown.append(("Nichtbandservice >100kg", amount))
+            elif metrics["billable_weight"] > 50 and non_conv_50 > 0:
+                carrier_surcharge_total += non_conv_50
+                carrier_surcharge_breakdown.append(("Nichtbandservice >50kg", non_conv_50))
+
+        for rule in carrier_surcharges.get("overlength_rules", []):
+            min_excl = float(rule["min_length_exclusive_cm"])
+            max_incl = float(rule["max_length_inclusive_cm"])
+            matching_count = sum(
+                1
+                for piece in pieces
+                if float(piece["length_cm"]) > min_excl
+                and float(piece["length_cm"]) <= max_incl
+            )
+            if matching_count > 0:
+                first_fee = float(rule.get("first_piece_surcharge_eur", 0.0))
+                additional_fee = float(rule.get("additional_piece_surcharge_eur", first_fee))
+                amount = first_fee + max(0, matching_count - 1) * additional_fee
+                carrier_surcharge_total += amount
+                carrier_surcharge_breakdown.append(
+                    (
+                        f"Ueberlaenge {int(min_excl)+1}-{int(max_incl)} cm ({matching_count} PS)",
+                        amount,
+                    )
+                )
+
+        for metrics in piece_metrics_list:
+            piece_girth = metrics["girth_plus_length"]
+            applicable_girth_fee = 0.0
+            for rule in carrier_surcharges.get("girth_rules", []):
+                min_excl = float(rule["min_girth_exclusive_cm"])
+                max_incl = float(rule["max_girth_inclusive_cm"])
+                if piece_girth > min_excl and piece_girth <= max_incl:
+                    applicable_girth_fee = max(
+                        applicable_girth_fee, float(rule["surcharge_eur_per_piece"])
+                    )
+            if applicable_girth_fee > 0:
+                carrier_surcharge_total += applicable_girth_fee
+                carrier_surcharge_breakdown.append(("Gurtmass-Zuschlag", applicable_girth_fee))
+
+    insurance_fee = (
+        calculate_insurance_fee(cfg, declared_goods_value_eur) if insurance_enabled else 0.0
+    )
+    total = (
+        base_total
+        + fuel_amount
+        + extras_total
+        + late_fee
+        + pickup_area_fee
+        + late_pickup_fee
+        + oversize_fee
+        + carrier_surcharge_total
+        + insurance_fee
+    )
+
+    return {
+        "carrier_label": tariff["carrier_label"],
+        "tariff_code": tariff_code,
+        "service_label": tariff.get("service_label", tariff_code),
+        "matched_bands": matched_bands,
+        "piece_metrics": piece_metrics_list,
+        "base_total": base_total,
+        "fuel_pct": fuel_pct,
+        "fuel_amount": fuel_amount,
+        "extras_breakdown": extras_breakdown,
+        "extras_total": extras_total,
+        "late_label": late_cfg["label"],
+        "late_fee": late_fee,
+        "pickup_area_label": pickup_area_label,
+        "pickup_area_fee": pickup_area_fee,
+        "late_pickup_label": late_pickup_label,
+        "late_pickup_fee": late_pickup_fee,
+        "oversize_fee": oversize_fee,
+        "carrier_surcharge_breakdown": carrier_surcharge_breakdown,
+        "carrier_surcharge_total": carrier_surcharge_total,
+        "insurance_fee": insurance_fee,
+        "total": total,
+    }
+
+
+def show_case_c():
+    st.subheader("C - Paketversand Deutschland")
+    st.caption("Nur fuer innerdeutsche und pakettaugliche Sendungen (MVP).")
+
+    try:
+        cfg = load_parcel_config()
+    except Exception as exc:
+        st.error(f"Tarifkonfiguration konnte nicht geladen werden: {exc}")
+        return
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.selectbox(
+            "Zielland",
+            ["DE - Deutschland"],
+            index=0,
+            disabled=True,
+            key="c_country_ui",
+        )
+        country_code = "DE"
+    with c2:
+        pickup_postal_code = st.text_input(
+            "Abhol-PLZ",
+            value=st.session_state.get("c_pickup_postal_code", "57072"),
+            key="c_pickup_postal_code",
+            max_chars=5,
+        )
+    with c3:
+        parcel_count = st.number_input(
+            "Anzahl Packstuecke",
+            min_value=1,
+            value=1,
+            step=1,
+            key="c_parcel_count",
+        )
+    with c4:
+        declared_goods_value = st.number_input(
+            "Warenwert (EUR)",
+            min_value=0.0,
+            value=0.0,
+            step=10.0,
+            key="c_goods_value",
+        )
+        insurance_enabled = st.checkbox(
+            "Hoeherversicherung aktivieren",
+            value=False,
+            key="c_insurance_enabled",
+            help="Nur bei aktivem Haken und Warenwert ueber 250 EUR wird ein Zuschlag berechnet.",
+        )
+
+    pickup_area = determine_pickup_area(cfg, pickup_postal_code)
+    if pickup_area is None:
+        st.warning("Bitte eine gueltige 5-stellige Abhol-PLZ eingeben.")
+        return
+    st.caption(f"Abholgebiet laut PLZ: {pickup_area}")
+    if pickup_area == "C":
+        note = cfg.get("pickup_area_rules", {}).get("C", {}).get("note")
+        if note:
+            st.warning(f"Gebiet C: {note}")
+
+    st.markdown("**Packstuecke**")
+    pieces = []
+    for i in range(int(parcel_count)):
+        with st.expander(f"Packstueck {i + 1}", expanded=(i == 0)):
+            p1, p2, p3, p4 = st.columns(4)
+            with p1:
+                p_weight = st.number_input(
+                    "Gewicht (kg)",
+                    min_value=0.1,
+                    value=5.0,
+                    step=0.1,
+                    key=f"c_piece_{i}_weight",
+                )
+            with p2:
+                p_length = st.number_input(
+                    "Laenge (cm)",
+                    min_value=1.0,
+                    value=40.0,
+                    step=1.0,
+                    key=f"c_piece_{i}_length",
+                )
+            with p3:
+                p_width = st.number_input(
+                    "Breite (cm)",
+                    min_value=1.0,
+                    value=30.0,
+                    step=1.0,
+                    key=f"c_piece_{i}_width",
+                )
+            with p4:
+                p_height = st.number_input(
+                    "Hoehe (cm)",
+                    min_value=1.0,
+                    value=20.0,
+                    step=1.0,
+                    key=f"c_piece_{i}_height",
+                )
+            pieces.append(
+                {
+                    "weight_kg": float(p_weight),
+                    "length_cm": float(p_length),
+                    "width_cm": float(p_width),
+                    "height_cm": float(p_height),
+                }
+            )
+
+    st.caption("IATA-Formel: L x B x H (cm) / 5000 = Volumengewicht (kg)")
+    st.caption("Gurtmass: Laenge + (2 x Breite) + (2 x Hoehe)")
+
+    piece_rows = []
+    for idx, piece in enumerate(pieces, start=1):
+        metrics = get_piece_metrics(cfg, piece)
+        piece_rows.append(
+            {
+                "Packstueck": idx,
+                "Real kg": f"{metrics['real_weight']:.1f}",
+                "Volumen kg": f"{metrics['volume_weight']:.1f}",
+                "Abrechnung kg": f"{metrics['billable_weight']:.1f}",
+                "Gurtmass cm": f"{metrics['girth_plus_length']:.1f}",
+            }
+        )
+    st.dataframe(piece_rows, use_container_width=True, hide_index=True)
+
+    service_keys = list(cfg["extra_delivery_services"].keys())
+    if "c_services" in st.session_state:
+        st.session_state["c_services"] = [
+            key for key in st.session_state["c_services"] if key in service_keys
+        ]
+
+    exp_services_cfg = (
+        cfg.get("carrier_specific_surcharges", {})
+        .get("EXP", {})
+        .get("extra_services", {})
+    )
+    exp_service_keys = list(exp_services_cfg.keys())
+    if "c_exp_services" in st.session_state:
+        st.session_state["c_exp_services"] = [
+            key for key in st.session_state["c_exp_services"] if key in exp_service_keys
+        ]
+
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        selected_services = st.multiselect(
+            "Optionale Zusatzleistungen",
+            service_keys,
+            format_func=lambda k: cfg["extra_delivery_services"][k]["label"],
+            key="c_services",
+        )
+    with s2:
+        pickup_timing = st.selectbox(
+            "Abholzeit / Spaetanmeldung",
+            list(cfg["late_fees"].keys()),
+            format_func=lambda k: cfg["late_fees"][k]["label"],
+            key="c_pickup_timing",
+        )
+    with s3:
+        is_pallet = st.checkbox("Palettensendung", value=False, key="c_is_pallet")
+        is_non_parcel = st.checkbox("Nicht pakettauglich", value=False, key="c_non_parcel")
+
+    selected_exp_services = st.multiselect(
+        "EXP Zusatzservices (nur Der Kurier)",
+        exp_service_keys,
+        format_func=lambda k: exp_services_cfg[k]["label"],
+        key="c_exp_services",
+    )
+
+    st.markdown("**Spaetabholung (EXP & LZ48)**")
+    lp1, lp2, lp3, lp4 = st.columns(4)
+    with lp1:
+        is_late_registration = st.checkbox(
+            "Anmeldung nach Cutoff",
+            value=False,
+            key="c_late_registration",
+            help="Gebiet A: nach 17 Uhr, Gebiet B: nach 16 Uhr",
+        )
+    with lp2:
+        st.text_input(
+            "Gebiet (aus PLZ)",
+            value=pickup_area,
+            key="c_pickup_area_display",
+            disabled=True,
+        )
+    with lp3:
+        pickup_window = st.selectbox(
+            "Abholfenster",
+            [row["label"] for row in cfg.get("late_pickup_rules", {}).get("time_window_fees", [])],
+            index=0,
+            key="c_pickup_window",
+            disabled=not is_late_registration,
+        )
+    with lp4:
+        additional_shipments = st.number_input(
+            "Weitere Sendungen",
+            min_value=0,
+            value=0,
+            step=1,
+            key="c_additional_shipments",
+            disabled=not is_late_registration,
+        )
+    self_dropoff_after_19 = st.checkbox(
+        "Selbstanlieferung ab 19 Uhr (nur Gebiet A)",
+        value=False,
+        key="c_self_dropoff_after_19",
+        disabled=(not is_late_registration) or pickup_area != "A",
+    )
+
+    blocking, warnings = evaluate_shipment_eligibility(
+        cfg, country_code, pieces, is_pallet, is_non_parcel
+    )
+    if warnings:
+        for msg in warnings:
+            st.warning(msg)
+    if blocking:
+        st.error("Sendung nicht fuer Modus C geeignet:")
+        for msg in blocking:
+            st.write(f"- {msg}")
+        st.info("Empfehlung: bitte Modus A/B oder Speditionsprozess nutzen.")
+        return
+
+    exp_reasons = evaluate_carrier_eligibility(
+        cfg, "EXP", pieces, selected_exp_services
+    )
+    lz48_reasons = evaluate_carrier_eligibility(cfg, "LZ48", pieces, [])
+
+    exp = None if exp_reasons else calculate_case_c_tariff(
+        cfg,
+        "EXP",
+        pieces,
+        selected_services,
+        pickup_timing,
+        declared_goods_value,
+        selected_exp_services,
+        {
+            "is_late_registration": is_late_registration,
+            "pickup_area": pickup_area,
+            "pickup_window": pickup_window,
+            "shipment_count": int(additional_shipments) + 1,
+            "additional_shipments": additional_shipments,
+            "self_dropoff_after_19": self_dropoff_after_19,
+        },
+        insurance_enabled=insurance_enabled,
+    )
+    lz48 = None if lz48_reasons else calculate_case_c_tariff(
+        cfg,
+        "LZ48",
+        pieces,
+        selected_services,
+        pickup_timing,
+        declared_goods_value,
+        [],
+        {
+            "is_late_registration": is_late_registration,
+            "pickup_area": pickup_area,
+            "pickup_window": pickup_window,
+            "shipment_count": int(additional_shipments) + 1,
+            "additional_shipments": additional_shipments,
+            "self_dropoff_after_19": self_dropoff_after_19,
+        },
+        insurance_enabled=insurance_enabled,
+    )
+
+    st.markdown("### Tarifvergleich Paket (Deutschland)")
+    t1, t2 = st.columns(2)
+    for col, carrier_code, result, reasons in [
+        (t1, "EXP", exp, exp_reasons),
+        (t2, "LZ48", lz48, lz48_reasons),
+    ]:
+        with col:
+            st.markdown(f"**{cfg['tariffs'][carrier_code]['carrier_label']}**")
+            st.caption(
+                f"Tarif: {cfg['tariffs'][carrier_code].get('service_label', carrier_code)} (intern: {carrier_code})"
+            )
+
+            if reasons:
+                st.error("Nicht moeglich fuer diese Sendung.")
+                for reason in reasons:
+                    st.write(f"- {reason}")
+            elif result is None:
+                st.error("Kein gueltiges Gewichtsband fuer diese Sendung.")
+            else:
+                st.success("Moeglich")
+                st.metric("Preis (netto)", format_eur(result["total"]))
+                st.caption(f"Ground Rate gesamt: {format_eur(result['base_total'])}")
+                st.caption(
+                    f"Service Surcharge (Fuel {result['fuel_pct']:.1f}%): {format_eur(result['fuel_amount'])}"
+                )
+                for name, amount in result["extras_breakdown"]:
+                    st.caption(f"Extra Service - {name}: {format_eur(amount)}")
+                if result["late_fee"] > 0:
+                    st.caption(
+                        f"Late Fee - {result['late_label']}: {format_eur(result['late_fee'])}"
+                    )
+                if result["pickup_area_fee"] > 0:
+                    st.caption(
+                        f"Abholgebiet - {result['pickup_area_label']}: {format_eur(result['pickup_area_fee'])}"
+                    )
+                if result["late_pickup_fee"] > 0:
+                    st.caption(
+                        f"Spaetabholung - {result['late_pickup_label']}: {format_eur(result['late_pickup_fee'])}"
+                    )
+                if result["oversize_fee"] > 0:
+                    st.caption(f"Oversize Surcharge: {format_eur(result['oversize_fee'])}")
+                for label, amount in result["carrier_surcharge_breakdown"]:
+                    st.caption(f"Sonderzuschlag - {label}: {format_eur(amount)}")
+                if result["insurance_fee"] > 0:
+                    st.caption(f"Hoeherversicherung: {format_eur(result['insurance_fee'])}")
+
+    render_case_c_recommendation(exp, lz48)
+
+
+def show_case_a():
+    st.subheader("A - Selbst fahren")
+
+    if "a_km" not in st.session_state:
+        st.session_state["a_km"] = 100.0
+    if "a_minutes" not in st.session_state:
+        st.session_state["a_minutes"] = 90
+
+    with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
+        ors_col1, ors_col2 = st.columns(2)
+        api_key = DEFAULT_ORS_API_KEY
+        _, ors_col4 = st.columns([1.2, 1])
+        with ors_col4:
+            profile = st.selectbox(
+                "Fahrprofil",
+                ["driving-car", "driving-hgv", "cycling-regular", "foot-walking"],
+                index=0,
+                key="a_ors_profile",
+                format_func=lambda p: ORS_PROFILE_LABELS.get(p, p),
+            )
+
+        with ors_col1:
+            start_address = address_input_with_autofill(
+                "Startadresse",
+                "a_start_address",
+                api_key,
+            )
+        with ors_col2:
+            target_address = address_input_with_autofill(
+                "Zieladresse",
+                "a_target_address",
+                api_key,
+            )
+
+        if st.button("Distanz und Fahrzeit von ORS holen", key="a_fetch_ors"):
+            if not start_address or not target_address:
+                st.error("Bitte Startadresse und Zieladresse ausfuellen.")
+            else:
+                try:
+                    distance_km, duration_minutes = get_ors_distance_and_duration(
+                        start_address,
+                        target_address,
+                        api_key,
+                        profile,
+                    )
+                    st.session_state["a_km"] = round(distance_km, 1)
+                    st.session_state["a_minutes"] = int(round(duration_minutes))
+                    st.success(
+                        f"ORS erfolgreich: {distance_km:.1f} km, {duration_minutes:.1f} Minuten"
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"ORS-Fehler: {exc}")
+
+    col1, col2, _ = st.columns([1, 1, 2])
+    with col1:
+        km = st.number_input("Kilometer", min_value=0.0, step=1.0, key="a_km")
+    with col2:
+        one_way_minutes = st.number_input(
+            "Fahrtdauer einfach (Minuten)", min_value=0, step=1, key="a_minutes"
+        )
+
+    (
+        lower_price,
+        price_mid,
+        upper_price,
+        total_minutes,
+        price_a1,
+        price_a2,
+    ) = calculate_case_a(km, one_way_minutes)
+
+    st.markdown("### VK-Vorschläge")
+    st.info("Alle folgenden Werte sind VK-Vorschläge (Verkaufspreise) für den Kunden.")
+
+    lower_source = (
+        "km-basiert (A.1 Formel)"
+        if price_a1 <= price_a2
+        else "zeitbasiert (A.2 Formel)"
+    )
+    upper_source = (
+        "zeitbasiert (A.2 Formel)"
+        if price_a1 <= price_a2
+        else "km-basiert (A.1 Formel)"
+    )
+    mid_source = "gemischt (Mittelwert aus A.1 und A.2)"
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("Untergrenze (VK)", format_eur(lower_price))
+        st.caption(format_eur_per_km(lower_price, km))
+        st.caption(lower_source)
+    with c2:
+        st.metric("Mittelwert (VK)", format_eur(price_mid))
+        st.caption(format_eur_per_km(price_mid, km))
+        st.caption(mid_source)
+    with c3:
+        st.metric("Obergrenze (VK)", format_eur(upper_price))
+        st.caption(format_eur_per_km(upper_price, km))
+        st.caption(upper_source)
+
+    st.markdown("**Preis für Angebot auswählen**")
+    if "a_selected_option" not in st.session_state:
+        st.session_state["a_selected_option"] = "Mittelwert"
+
+    current_a_option = st.session_state["a_selected_option"]
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        a_lower_active = current_a_option == "Untergrenze"
+        if st.button(
+            "✓ Untergrenze" if a_lower_active else "Untergrenze",
+            key="a_pick_lower",
+            use_container_width=True,
+            type="primary" if a_lower_active else "secondary",
+        ):
+            st.session_state["a_selected_option"] = "Untergrenze"
+            st.rerun()
+        st.caption(lower_source)
+    with s2:
+        a_mid_active = current_a_option == "Mittelwert"
+        if st.button(
+            "✓ Mittelwert" if a_mid_active else "Mittelwert",
+            key="a_pick_mid",
+            use_container_width=True,
+            type="primary" if a_mid_active else "secondary",
+        ):
+            st.session_state["a_selected_option"] = "Mittelwert"
+            st.rerun()
+        st.caption(mid_source)
+    with s3:
+        a_upper_active = current_a_option == "Obergrenze"
+        if st.button(
+            "✓ Obergrenze" if a_upper_active else "Obergrenze",
+            key="a_pick_upper",
+            use_container_width=True,
+            type="primary" if a_upper_active else "secondary",
+        ):
+            st.session_state["a_selected_option"] = "Obergrenze"
+            st.rerun()
+        st.caption(upper_source)
+
+    selected_option = st.session_state["a_selected_option"]
+    selected_prices = {
+        "Untergrenze": lower_price,
+        "Mittelwert": price_mid,
+        "Obergrenze": upper_price,
+    }
+    selected_sources = {
+        "Untergrenze": lower_source,
+        "Mittelwert": mid_source,
+        "Obergrenze": upper_source,
+    }
+    selected_key = {
+        "Untergrenze": "lower",
+        "Mittelwert": "mid",
+        "Obergrenze": "upper",
+    }
+
+    st.caption(
+        f"Aktive Auswahl: {selected_option} ({selected_sources[selected_option]})"
+    )
+    render_confidence_box(
+        lower_price,
+        upper_price,
+        "A-Modell (A.1 vs. A.2)",
+    )
+    render_copy_price(
+        "Empfohlener Preis",
+        selected_prices[selected_option],
+        f"a_{selected_key[selected_option]}",
+    )
+
+    st.markdown("**Kurze Herleitung**")
+    st.write(
+        f"A.1 Formel: 29,00 € + (1,30 € x {km:.1f} km) = {format_eur(price_a1)}"
+    )
+    st.write(
+        "A.2 Formel: "
+        f"(2 x {one_way_minutes} min + 30 min) = {total_minutes:.0f} min, "
+        f"das entspricht {total_minutes / 60:.2f} h x 60 € = {format_eur(price_a2)}"
+    )
+    st.write(
+        f"Dynamische Sortierung: Untergrenze = {format_eur(lower_price)}, "
+        f"Obergrenze = {format_eur(upper_price)}"
+    )
+
+def show_case_b():
+    st.subheader("B - Extern vergeben")
+
+    if "b_km" not in st.session_state:
+        st.session_state["b_km"] = 150.0
+    if "b_ors_duration_minutes" not in st.session_state:
+        st.session_state["b_ors_duration_minutes"] = None
+    if "b_ors_profile" not in st.session_state:
+        st.session_state["b_ors_profile"] = "driving-car"
+    if "b_vehicle_type" not in st.session_state:
+        st.session_state["b_vehicle_type"] = ORS_PROFILE_TO_VEHICLE.get(
+            st.session_state["b_ors_profile"], "Transporter / Sprinter"
+        )
+
+    with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
+        ors_b_col1, ors_b_col2 = st.columns(2)
+        api_key_b = DEFAULT_ORS_API_KEY
+        _, ors_b_col4 = st.columns([1.2, 1])
+        with ors_b_col4:
+            profile_b = st.selectbox(
+                "Fahrprofil",
+                ["driving-car", "driving-hgv", "cycling-regular", "foot-walking"],
+                key="b_ors_profile",
+                format_func=lambda p: ORS_PROFILE_LABELS.get(p, p),
+                on_change=sync_b_vehicle_from_profile,
+            )
+
+        with ors_b_col1:
+            start_address_b = address_input_with_autofill(
+                "Startadresse",
+                "b_start_address",
+                api_key_b,
+            )
+        with ors_b_col2:
+            target_address_b = address_input_with_autofill(
+                "Zieladresse",
+                "b_target_address",
+                api_key_b,
+            )
+
+        if st.button("Distanz von ORS holen", key="b_fetch_ors"):
+            if not start_address_b or not target_address_b:
+                st.error("Bitte Startadresse und Zieladresse ausfuellen.")
+            else:
+                try:
+                    distance_km_b, duration_minutes_b = get_ors_distance_and_duration(
+                        start_address_b,
+                        target_address_b,
+                        api_key_b,
+                        profile_b,
+                    )
+                    st.session_state["b_km"] = round(distance_km_b, 1)
+                    st.session_state["b_ors_duration_minutes"] = int(
+                        round(duration_minutes_b)
+                    )
+                    st.success(
+                        f"ORS erfolgreich: {distance_km_b:.1f} km, {duration_minutes_b:.1f} Minuten"
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"ORS-Fehler: {exc}")
+
+    col1, col2, col3, _ = st.columns([1, 1.4, 1, 1.2])
+    with col1:
+        km = st.number_input("Kilometer", min_value=0.0, step=1.0, key="b_km")
+        if st.session_state.get("b_ors_duration_minutes") is not None:
+            st.caption(
+                f"Info (ORS): {km:.1f} km | {st.session_state['b_ors_duration_minutes']} min"
+            )
+    with col2:
+        vehicle_type = st.selectbox(
+            "Fahrzeugtyp",
+            list(RATE_TABLE.keys()),
+            key="b_vehicle_type",
+            on_change=sync_b_profile_from_vehicle,
+        )
+    with col3:
+        ek_price = st.number_input(
+            "Einkaufspreis (EK)", min_value=0.0, value=200.0, step=1.0
+        )
+
+    ek_prices = calculate_case_b_ek(ek_price)
+    distance_class, rates, table_prices = calculate_case_b_table(km, vehicle_type)
+
+    st.markdown("### VK-Vorschläge")
+    st.info("Alle folgenden Werte sind VK-Vorschläge (Verkaufspreise) für den Kunden.")
+
+    b_options = {
+        "EK x 1,3": ek_prices["EK x 1,3"],
+        "EK x 1,4": ek_prices["EK x 1,4"],
+        "EK x 1,5": ek_prices["EK x 1,5"],
+        "Tabellen-Min": table_prices["Tabellen-Min"],
+        "Tabellen-Mittel": table_prices["Tabellen-Mittel"],
+        "Tabellen-Max": table_prices["Tabellen-Max"],
+    }
+
+    if "b_selected_option" not in st.session_state:
+        st.session_state["b_selected_option"] = "Tabellen-Mittel"
+
+    current_b_option = st.session_state["b_selected_option"]
+    st.markdown("**B.1 EK-basierte VK-Vorschläge (klickbar)**")
+    b1_col1, b1_col2, b1_col3 = st.columns(3)
+    with b1_col1:
+        b_ek13_active = current_b_option == "EK x 1,3"
+        if st.button(
+            f"{'✓ ' if b_ek13_active else ''}EK x 1,3: {format_eur(b_options['EK x 1,3'])}",
+            key="b_pick_ek_13",
+            use_container_width=True,
+            type="primary" if b_ek13_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "EK x 1,3"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["EK x 1,3"], km))
+    with b1_col2:
+        b_ek14_active = current_b_option == "EK x 1,4"
+        if st.button(
+            f"{'✓ ' if b_ek14_active else ''}EK x 1,4: {format_eur(b_options['EK x 1,4'])}",
+            key="b_pick_ek_14",
+            use_container_width=True,
+            type="primary" if b_ek14_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "EK x 1,4"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["EK x 1,4"], km))
+    with b1_col3:
+        b_ek15_active = current_b_option == "EK x 1,5"
+        if st.button(
+            f"{'✓ ' if b_ek15_active else ''}EK x 1,5: {format_eur(b_options['EK x 1,5'])}",
+            key="b_pick_ek_15",
+            use_container_width=True,
+            type="primary" if b_ek15_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "EK x 1,5"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["EK x 1,5"], km))
+
+    st.markdown("**B.2 Tabellen-VK-Richtwerte (klickbar)**")
+    b2_col1, b2_col2, b2_col3 = st.columns(3)
+    with b2_col1:
+        b_tab_min_active = current_b_option == "Tabellen-Min"
+        if st.button(
+            f"{'✓ ' if b_tab_min_active else ''}Tabellen-Min: {format_eur(b_options['Tabellen-Min'])}",
+            key="b_pick_tab_min",
+            use_container_width=True,
+            type="primary" if b_tab_min_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "Tabellen-Min"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["Tabellen-Min"], km))
+    with b2_col2:
+        b_tab_mid_active = current_b_option == "Tabellen-Mittel"
+        if st.button(
+            f"{'✓ ' if b_tab_mid_active else ''}Tabellen-Mittel: {format_eur(b_options['Tabellen-Mittel'])}",
+            key="b_pick_tab_mid",
+            use_container_width=True,
+            type="primary" if b_tab_mid_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "Tabellen-Mittel"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["Tabellen-Mittel"], km))
+    with b2_col3:
+        b_tab_max_active = current_b_option == "Tabellen-Max"
+        if st.button(
+            f"{'✓ ' if b_tab_max_active else ''}Tabellen-Max: {format_eur(b_options['Tabellen-Max'])}",
+            key="b_pick_tab_max",
+            use_container_width=True,
+            type="primary" if b_tab_max_active else "secondary",
+        ):
+            st.session_state["b_selected_option"] = "Tabellen-Max"
+            st.rerun()
+        st.caption(format_eur_per_km(b_options["Tabellen-Max"], km))
+
+    b_selected_option = st.session_state["b_selected_option"]
+    st.caption(f"Aktive Auswahl: {b_selected_option}")
+    render_confidence_box(
+        min(b_options.values()),
+        max(b_options.values()),
+        "B-Modell (alle Vorschlaege)",
+    )
+    render_copy_price(
+        "Empfohlener Preis",
+        b_options[b_selected_option],
+        f"b_{b_selected_option.replace(' ', '_').replace(',', '').replace('-', '_').lower()}",
+    )
+
+    st.markdown("**Kurze Herleitung**")
+    st.write(f"Distanzklasse bei {km:.1f} km: **{distance_class}**")
+    st.write(
+        "Genutzte Sätze (EUR/km): "
+        f"min {rates['min']:.2f}, mittel {rates['mittel']:.2f}, max {rates['max']:.2f}"
+    )
+
+def main():
+    st.set_page_config(page_title="Versandwerk Direktfahrt-Rechner", layout="wide")
+
+    st.title("Versandwerk Direktfahrt-Rechner")
+    st.caption("Interner MVP fuer Preisfindung: Direktfahrt und Paketversand")
+
+    mode = st.radio(
+        "Bitte Modus wählen",
+        ["A - Selbst fahren", "B - Extern vergeben", "C - Paketversand Deutschland"],
+        horizontal=True,
+    )
+
+    st.divider()
+
+    if mode == "A - Selbst fahren":
+        show_case_a()
+    elif mode == "B - Extern vergeben":
+        show_case_b()
+    else:
+        show_case_c()
+
+
+if __name__ == "__main__":
+    main()

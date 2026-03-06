@@ -1,0 +1,14 @@
+2026-03-06 15:01:14.783 No ASGI app assignments found in C:\Users\admin\Documents\01_versandwerk\15_IT und Software\01_Preisrechner 2026\ChatGPT VS Code\direktfahrt_rechner.py
+2026-03-06 15:01:14.875 Filtered 39 packages down to 1 candidates for component scanning
+2026-03-06 15:01:14.877 Scanning 1 candidate packages for component manifests using 1 worker threads
+2026-03-06 15:01:14.915 Found 0 component manifests total
+2026-03-06 15:01:14.917 No asset roots to watch
+2026-03-06 15:01:14.918 File watching not started
+2026-03-06 15:01:14.920 Starting new event loop for server
+2026-03-06 15:01:14.921 Starting server...
+2026-03-06 15:01:14.922 Serving static content from C:\Users\admin\Documents\01_versandwerk\15_IT und Software\01_Preisrechner 2026\ChatGPT VS Code\.venv\Lib\site-packages\streamlit\static
+2026-03-06 15:01:14.925 Server started on port 8501
+2026-03-06 15:01:14.926 Runtime state: RuntimeState.INITIAL -> RuntimeState.NO_SESSIONS_CONNECTED
+2026-03-06 15:01:15.143 Did not auto detect external IP.
+Please go to https://docs.streamlit.io/ for debugging hints.
+2026-03-06 15:01:15.158 Setting up signal handler
