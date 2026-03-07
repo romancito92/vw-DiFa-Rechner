@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 import streamlit as st
 
 from config import (
@@ -18,6 +18,7 @@ from ui_helpers import (
     render_copy_text_button,
     build_case_c_offer_text,
     build_case_c_price_rows,
+    build_case_c_price_bullets,
     render_case_c_plausibility_checks,
     render_copy_price,
 )
@@ -310,14 +311,10 @@ def show_case_c():
             service_keys,
             format_func=lambda k: cfg["extra_delivery_services"][k]["label"],
             key="c_services",
+            placeholder="Extras auswählen",
         )
     with s2:
-        pickup_timing = st.selectbox(
-            "Abholzeit / Spätanmeldung",
-            list(cfg["late_fees"].keys()),
-            format_func=lambda k: cfg["late_fees"][k]["label"],
-            key="c_pickup_timing",
-        )
+        st.caption("Spätanmeldung wird über die Checkbox unten gesteuert.")
     with s3:
         is_pallet = st.checkbox("Palettensendung", value=False, key="c_is_pallet")
         is_non_parcel = st.checkbox("Nicht pakettauglich", value=False, key="c_non_parcel")
@@ -330,10 +327,10 @@ def show_case_c():
         key="c_exp_time_service",
     )
     exp_day_choice = st.selectbox(
-        "EXP Zustelltag (exklusiv)",
+        "EXP Zustelltag",
         [""] + day_service_keys,
         index=([""] + day_service_keys).index(st.session_state["c_exp_day_service"]),
-        format_func=lambda k: "Kein Tagesservice" if k == "" else exp_services_cfg[k]["label"],
+        format_func=lambda k: "Werktag (Standard)" if k == "" else exp_services_cfg[k]["label"],
         key="c_exp_day_service",
     )
     selected_exp_non_time_services = st.multiselect(
@@ -341,6 +338,7 @@ def show_case_c():
         [k for k in exp_service_keys if k not in time_service_keys and k not in day_service_keys],
         format_func=lambda k: exp_services_cfg[k]["label"],
         key="c_exp_services",
+        placeholder="Extras auswählen",
     )
     selected_exp_services = list(selected_exp_non_time_services)
     if exp_time_choice:
@@ -355,18 +353,18 @@ def show_case_c():
         service_key in exp_time_commitment_keys for service_key in selected_exp_services
     )
 
-    st.markdown("**Spaetabholung (EXP & LZ48)**")
+    st.markdown("**Spätabholung (EXP & LZ48)**")
     lp1, lp2, lp3, lp4 = st.columns(4)
     with lp1:
         is_late_registration = st.checkbox(
-            "Anmeldung nach Cutoff",
+            "Spätanmeldung",
             value=False,
             key="c_late_registration",
             help="Cutoff: nach 17 Uhr in Gebiet A, nach 16 Uhr in Gebiet B.",
         )
     with lp2:
         is_late_pickup = st.checkbox(
-            "Spaetabholung erforderlich",
+            "Spätabholung erforderlich",
             value=False,
             key="c_late_pickup_required",
         )
@@ -387,14 +385,14 @@ def show_case_c():
         )
 
     st.info("Cutoff: nach 17 Uhr in Gebiet A, nach 16 Uhr in Gebiet B.")
-    additional_shipments = st.number_input(
-        "Weitere Sendungen",
-        min_value=0,
-        value=0,
-        step=1,
-        key="c_additional_shipments",
+    has_additional_shipments = st.checkbox(
+        "Weitere Sendungen in dieser Abholung?",
+        value=False,
+        key="c_has_additional_shipments",
+        help="Wenn beim selben Kunden weitere Sendungen spät abgeholt werden, fällt dieser Service nur einmalig an.",
         disabled=not is_late_pickup,
     )
+    pickup_timing = "late_registration" if is_late_registration else "standard"
     self_dropoff_after_19 = st.checkbox(
         "Selbstanlieferung ab 19 Uhr (nur Gebiet A)",
         value=False,
@@ -420,10 +418,10 @@ def show_case_c():
     )
     lz48_reasons = evaluate_carrier_eligibility(cfg, "LZ48", pieces, [])
     if is_pallet:
-        lz48_reasons.append("Palettensendung ist fuer LZ48 nicht moeglich.")
+        lz48_reasons.append("Palettensendung ist für LZ48 nicht möglich.")
     if lz48_blocked_by_exp_timing:
         lz48_reasons.append(
-            "Ausgewaehlter EXP-Terminservice (z. B. 8/9/10/12 Uhr oder Fixtermin) macht LZ48 unzulaessig."
+            "Ausgewählter EXP-Terminservice (z. B. 8/9/10/12 Uhr oder Fixtermin) macht LZ48 unzulässig."
         )
 
     needs_deku_check = False
@@ -433,18 +431,18 @@ def show_case_c():
         deku_reasons.append("palettierte Sendung")
     if any(float(piece["length_cm"]) > 270.0 for piece in pieces):
         needs_deku_check = True
-        deku_reasons.append("Laenge ueber 270 cm")
+        deku_reasons.append("Länge über 270 cm")
     if any(get_piece_metrics(cfg, piece)["billable_weight"] > 50.0 for piece in pieces):
         needs_deku_check = True
-        deku_reasons.append("Abrechnungsgewicht ueber 50 kg")
+        deku_reasons.append("Abrechnungsgewicht über 50 kg")
     if needs_deku_check:
         st.warning(
-            "Wichtiger Hinweis fuer Dispo: Vor Beauftragung bitte zwingend mit der DeKu-Station klaeren, "
-            f"ob die Zustellung moeglich ist ({', '.join(deku_reasons)})."
+            "Wichtiger Hinweis für Dispo: Vor Beauftragung bitte zwingend mit der DeKu-Station klären, "
+            f"ob die Zustellung möglich ist ({', '.join(deku_reasons)})."
         )
     if island_service_selected:
         st.warning(
-            "Inselzustellung ist moeglicherweise realisierbar, aber nur nach expliziter Pruefung mit der DeKu-Station "
+            "Inselzustellung ist möglicherweise realisierbar, aber nur nach expliziter Prüfung mit der DeKu-Station "
             "(Preis auf Anfrage / manuelle Freigabe)."
         )
     render_case_c_plausibility_checks(
@@ -471,8 +469,8 @@ def show_case_c():
             "is_late_pickup": is_late_pickup,
             "pickup_area": pickup_area,
             "pickup_window": pickup_window,
-            "shipment_count": int(additional_shipments) + 1,
-            "additional_shipments": additional_shipments,
+            "shipment_count": 2 if has_additional_shipments else 1,
+            "additional_shipments": 0,
             "self_dropoff_after_19": self_dropoff_after_19,
         },
         insurance_enabled=insurance_enabled,
@@ -490,8 +488,8 @@ def show_case_c():
             "is_late_pickup": is_late_pickup,
             "pickup_area": pickup_area,
             "pickup_window": pickup_window,
-            "shipment_count": int(additional_shipments) + 1,
-            "additional_shipments": additional_shipments,
+            "shipment_count": 2 if has_additional_shipments else 1,
+            "additional_shipments": 0,
             "self_dropoff_after_19": self_dropoff_after_19,
         },
         insurance_enabled=insurance_enabled,
@@ -544,10 +542,11 @@ def show_case_c():
                     st.caption(f"Höherversicherung: {format_eur(result['insurance_fee'])}")
                 with st.expander("Änderungsprotokoll (Preisbausteine)", expanded=False):
                     rows = build_case_c_price_rows(result)
-                    st.dataframe(
-                        [{"Baustein": name, "Betrag": format_eur(amount)} for name, amount in rows],
-                        use_container_width=True,
-                        hide_index=True,
+                    st.table([{"Baustein": name, "Betrag": format_eur(amount)} for name, amount in rows])
+                    render_copy_text_button(
+                        "Preisbausteine kopieren",
+                        build_case_c_price_bullets(result),
+                        f"c_price_blocks_{carrier_code.lower()}",
                     )
                 if carrier_code == "LZ48" and lz48_not_offerable_vs_exp:
                     st.error(
@@ -823,7 +822,7 @@ def show_case_a():
     st.write(
         "A.2 Formel: "
         f"(2 x {one_way_minutes} min + 30 min) = {total_minutes:.0f} min, "
-        f"das entspricht {total_minutes / 60:.2f} h x 60 € = {format_eur(price_a2)}"
+        f"das entspricht {total_minutes / 60:.2f} h x 60 â‚¬ = {format_eur(price_a2)}"
     )
     st.write(
         f"Dynamische Sortierung: Untergrenze = {format_eur(lower_price)}, "
@@ -919,27 +918,66 @@ def show_case_b():
         ek_price = st.number_input(
             "Einkaufspreis (EK)", min_value=0.0, value=200.0, step=1.0
         )
-
     ek_prices = calculate_case_b_ek(ek_price)
     distance_class, rates, table_prices = calculate_case_b_table(km, vehicle_type)
 
+    table_ek_min = table_prices["Tabellen-Min"]
+    table_ek_mid = table_prices["Tabellen-Mittel"]
+    table_ek_max = table_prices["Tabellen-Max"]
+
+    st.markdown("### B.2 Tabellen-EK-Richtwerte (Orientierung)")
+    st.info(
+        "Die Tabellenwerte werden hier als EK-Richtwerte zur Bewertung des eingetragenen EK genutzt."
+    )
+
+    ek_col1, ek_col2, ek_col3 = st.columns(3)
+    ek_col1.metric("EK-Richtwert Min", format_eur(table_ek_min))
+    ek_col2.metric("EK-Richtwert Mittel", format_eur(table_ek_mid))
+    ek_col3.metric("EK-Richtwert Max", format_eur(table_ek_max))
+
+    nearest_key = min(
+        ("min", "mittel", "max"),
+        key=lambda k: abs(
+            ek_price
+            - {
+                "min": table_ek_min,
+                "mittel": table_ek_mid,
+                "max": table_ek_max,
+            }[k]
+        ),
+    )
+
+    if ek_price <= table_ek_min or nearest_key == "min":
+        st.success(
+            "Sehr guter EK: liegt nahe am Tabellen-Min oder darunter. "
+            "Bitte Partner-Vertrauenswürdigkeit und vollständige Ausführung bestätigen. "
+            "Tendenz B.1: eher x1,4 oder x1,5."
+        )
+    elif ek_price >= table_ek_max or nearest_key == "max":
+        st.error(
+            "Achtung: EK verhältnismäßig teuer (nahe Tabellen-Max oder darüber). "
+            "Wenn möglich weitere Partner und Optionen prüfen. "
+            "Tendenz B.1: eher defensiv x1,3."
+        )
+    else:
+        st.info(
+            "EK liegt im erwarteten Mittelfeld (nahe Tabellen-Mittel). "
+            "Tendenz B.1: x1,3 bis x1,4 je nach Kunden-/Marktsituation."
+        )
+
     st.markdown("### VK-Vorschläge")
-    st.info("Alle folgenden Werte sind VK-Vorschläge (Verkaufspreise) für den Kunden.")
+    st.markdown("**B.1 EK-basierte VK-Vorschläge (klickbar)**")
 
     b_options = {
         "EK x 1,3": ek_prices["EK x 1,3"],
         "EK x 1,4": ek_prices["EK x 1,4"],
         "EK x 1,5": ek_prices["EK x 1,5"],
-        "Tabellen-Min": table_prices["Tabellen-Min"],
-        "Tabellen-Mittel": table_prices["Tabellen-Mittel"],
-        "Tabellen-Max": table_prices["Tabellen-Max"],
     }
 
     if "b_selected_option" not in st.session_state:
-        st.session_state["b_selected_option"] = "Tabellen-Mittel"
+        st.session_state["b_selected_option"] = "EK x 1,4"
 
     current_b_option = st.session_state["b_selected_option"]
-    st.markdown("**B.1 EK-basierte VK-Vorschläge (klickbar)**")
     b1_col1, b1_col2, b1_col3 = st.columns(3)
     with b1_col1:
         b_ek13_active = current_b_option == "EK x 1,3"
@@ -975,48 +1013,97 @@ def show_case_b():
             st.rerun()
         st.caption(format_eur_per_km(b_options["EK x 1,5"], km))
 
-    st.markdown("**B.2 Tabellen-VK-Richtwerte (klickbar)**")
+    st.markdown("**B.2 Tabellen-EK-Richtwert x Faktor = VK (klickbar)**")
+    st.caption("Jeder Tabellen-EK-Wert kann separat mit x1,3 / x1,4 / x1,5 multipliziert werden.")
+
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        b2_factor_min = st.selectbox(
+            "Faktor für Tabellen-Min",
+            [1.3, 1.4, 1.5],
+            index=0,
+            key="b2_factor_min",
+        )
+    with f2:
+        b2_factor_mid = st.selectbox(
+            "Faktor für Tabellen-Mittel",
+            [1.3, 1.4, 1.5],
+            index=1,
+            key="b2_factor_mid",
+        )
+    with f3:
+        b2_factor_max = st.selectbox(
+            "Faktor für Tabellen-Max",
+            [1.3, 1.4, 1.5],
+            index=2,
+            key="b2_factor_max",
+        )
+
+    b2_vk_min_label = f"B2 Min x{str(b2_factor_min).replace('.', ',')}"
+    b2_vk_mid_label = f"B2 Mittel x{str(b2_factor_mid).replace('.', ',')}"
+    b2_vk_max_label = f"B2 Max x{str(b2_factor_max).replace('.', ',')}"
+
+    b2_vk_min = table_ek_min * b2_factor_min
+    b2_vk_mid = table_ek_mid * b2_factor_mid
+    b2_vk_max = table_ek_max * b2_factor_max
+
+    b_options[b2_vk_min_label] = b2_vk_min
+    b_options[b2_vk_mid_label] = b2_vk_mid
+    b_options[b2_vk_max_label] = b2_vk_max
+
+    if st.session_state["b_selected_option"] not in b_options:
+        st.session_state["b_selected_option"] = b2_vk_mid_label
+    current_b_option = st.session_state["b_selected_option"]
+
     b2_col1, b2_col2, b2_col3 = st.columns(3)
     with b2_col1:
-        b_tab_min_active = current_b_option == "Tabellen-Min"
+        b_tab_min_active = current_b_option == b2_vk_min_label
         if st.button(
-            f"{'✓ ' if b_tab_min_active else ''}Tabellen-Min: {format_eur(b_options['Tabellen-Min'])}",
+            f"{'✓ ' if b_tab_min_active else ''}{b2_vk_min_label}: {format_eur(b2_vk_min)}",
             key="b_pick_tab_min",
             use_container_width=True,
             type="primary" if b_tab_min_active else "secondary",
         ):
-            st.session_state["b_selected_option"] = "Tabellen-Min"
+            st.session_state["b_selected_option"] = b2_vk_min_label
             st.rerun()
-        st.caption(format_eur_per_km(b_options["Tabellen-Min"], km))
+        st.caption(
+            f"Basis EK {format_eur(table_ek_min)} · {format_eur_per_km(b2_vk_min, km)}"
+        )
     with b2_col2:
-        b_tab_mid_active = current_b_option == "Tabellen-Mittel"
+        b_tab_mid_active = current_b_option == b2_vk_mid_label
         if st.button(
-            f"{'✓ ' if b_tab_mid_active else ''}Tabellen-Mittel: {format_eur(b_options['Tabellen-Mittel'])}",
+            f"{'✓ ' if b_tab_mid_active else ''}{b2_vk_mid_label}: {format_eur(b2_vk_mid)}",
             key="b_pick_tab_mid",
             use_container_width=True,
             type="primary" if b_tab_mid_active else "secondary",
         ):
-            st.session_state["b_selected_option"] = "Tabellen-Mittel"
+            st.session_state["b_selected_option"] = b2_vk_mid_label
             st.rerun()
-        st.caption(format_eur_per_km(b_options["Tabellen-Mittel"], km))
+        st.caption(
+            f"Basis EK {format_eur(table_ek_mid)} · {format_eur_per_km(b2_vk_mid, km)}"
+        )
     with b2_col3:
-        b_tab_max_active = current_b_option == "Tabellen-Max"
+        b_tab_max_active = current_b_option == b2_vk_max_label
         if st.button(
-            f"{'✓ ' if b_tab_max_active else ''}Tabellen-Max: {format_eur(b_options['Tabellen-Max'])}",
+            f"{'✓ ' if b_tab_max_active else ''}{b2_vk_max_label}: {format_eur(b2_vk_max)}",
             key="b_pick_tab_max",
             use_container_width=True,
             type="primary" if b_tab_max_active else "secondary",
         ):
-            st.session_state["b_selected_option"] = "Tabellen-Max"
+            st.session_state["b_selected_option"] = b2_vk_max_label
             st.rerun()
-        st.caption(format_eur_per_km(b_options["Tabellen-Max"], km))
+        st.caption(
+            f"Basis EK {format_eur(table_ek_max)} · {format_eur_per_km(b2_vk_max, km)}"
+        )
 
     b_selected_option = st.session_state["b_selected_option"]
+    expected_re_margin = b_options[b_selected_option] - ek_price
     st.caption(f"Aktive Auswahl: {b_selected_option}")
     render_confidence_box(
         min(b_options.values()),
         max(b_options.values()),
         "B-Modell (alle Vorschläge)",
+        expected_re_margin=expected_re_margin,
     )
     render_copy_price(
         "Empfohlener Preis",
@@ -1030,7 +1117,6 @@ def show_case_b():
         "Genutzte Sätze (EUR/km): "
         f"min {rates['min']:.2f}, mittel {rates['mittel']:.2f}, max {rates['max']:.2f}"
     )
-
 def main():
     st.set_page_config(page_title="Versandwerk Preisrechner [intern]", layout="wide")
 
@@ -1063,4 +1149,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 

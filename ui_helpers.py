@@ -15,7 +15,7 @@ def format_eur_per_km(value, km):
     return f"{per_km:,.2f} €/km".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def render_confidence_box(min_price, max_price, caption):
+def render_confidence_box(min_price, max_price, caption, expected_re_margin=None):
     """Zeigt Preis-Confidence auf Basis der Spanne."""
     span = max_price - min_price
     mid = (min_price + max_price) / 2 if (min_price + max_price) > 0 else 0
@@ -32,17 +32,19 @@ def render_confidence_box(min_price, max_price, caption):
     elif span_pct < 50:
         level = "Niedrig"
         tone = "warning"
-        hint = "Groessere Streuung. Bitte kurz abstimmen."
+        hint = "Größere Streuung. Bitte kurz abstimmen."
     else:
         level = "Niedrig"
         tone = "error"
-        hint = "Achtung - Preis bitte genau pruefen."
+        hint = "Achtung - Preis bitte genau prüfen."
 
     st.markdown("**Preis-Confidence**")
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Confidence", level)
-    c2.metric("Spanne", format_eur(span))
-    c3.metric("Relative Spanne", f"{span_pct:.1f} %")
+    if expected_re_margin is not None:
+        c1.metric("Erwartete RE-Marge", format_eur(expected_re_margin))
+    c2.metric("Confidence", level)
+    c3.metric("Spanne", format_eur(span))
+    c4.metric("Relative Spanne", f"{span_pct:.1f} %")
     if tone == "success":
         st.success(f"{caption}: {hint}")
     elif tone == "warning":
@@ -54,13 +56,13 @@ def render_confidence_box(min_price, max_price, caption):
 def render_case_c_recommendation(exp_result, lz48_result):
     """Zeigt C-spezifische Empfehlung statt generischer Confidence."""
     if exp_result is None and lz48_result is None:
-        st.warning("Keine Paketoption moeglich. Bitte anderen Transportmodus waehlen.")
+        st.warning("Keine Paketoption möglich. Bitte anderen Transportmodus wählen.")
         return
     if exp_result is None:
-        st.warning("Nur LZ48 ist moeglich. EXP ist ausgeschlossen.")
+        st.warning("Nur LZ48 ist möglich. EXP ist ausgeschlossen.")
         return
     if lz48_result is None:
-        st.info("Nur EXP ist moeglich. LZ48 ist ausgeschlossen.")
+        st.info("Nur EXP ist möglich. LZ48 ist ausgeschlossen.")
         return
 
     exp_price = exp_result["total"]
@@ -74,17 +76,17 @@ def render_case_c_recommendation(exp_result, lz48_result):
     r1.metric("Preisunterschied", format_eur(diff))
     r2.metric("Relativer Unterschied", f"{diff_pct:.1f} %")
     cheaper = "EXP" if exp_price < lz48_price else "LZ48"
-    r3.metric("Guenstiger", cheaper)
+    r3.metric("Günstiger", cheaper)
 
     if lz48_price >= exp_price:
         st.error(
-            "LZ48 ist nicht guenstiger als EXP. Fuer den Kunden nur EXP aktiv anbieten."
+            "LZ48 ist nicht günstiger als EXP. Für den Kunden nur EXP aktiv anbieten."
         )
         return
 
     if diff_pct >= 25:
         st.success(
-            "Grosser Preisunterschied: beide Tarife aktiv anbieten (Kunde kann zwischen Preis und Service waehlen)."
+            "Großer Preisunterschied: beide Tarife aktiv anbieten (Kunde kann zwischen Preis und Service wählen)."
         )
     elif diff_pct <= 10:
         st.warning(
@@ -92,7 +94,7 @@ def render_case_c_recommendation(exp_result, lz48_result):
         )
     else:
         st.info(
-            "Mittlerer Preisunterschied: EXP als Standard nennen, LZ48 optional als Preisalternative erwaehnen."
+            "Mittlerer Preisunterschied: EXP als Standard nennen, LZ48 optional als Preisalternative erwähnen."
         )
 
 
@@ -133,10 +135,18 @@ def build_case_c_offer_text(result, alternative_result=None):
     """Erzeugt Angebots-Textbaustein fuer Modus C."""
     price_net = format_eur(result["total"]).replace(" €", "")
     main_product = _build_case_c_product_label(result)
+    extra_labels = [name for name, amount in result["extras_breakdown"] if amount > 0]
+    if result["late_fee"] > 0:
+        extra_labels.append("Spätanmeldung")
+    if result["late_pickup_fee"] > 0:
+        extra_labels.append("Spätabholung")
+    if result["insurance_fee"] > 0:
+        extra_labels.append("Höherversicherung")
+    service_suffix = f" ({'; '.join(extra_labels)})" if extra_labels else ""
     lines = [
         "Nochmals vielen Dank für Ihre Anfrage.",
         "",
-        f"Versandart: {main_product}",
+        f"Versandart: {main_product}{service_suffix}",
         f"Preis: {price_net} EUR netto.",
     ]
     if alternative_result is not None:
@@ -153,19 +163,25 @@ def build_case_c_price_rows(result):
     for name, amount in result["extras_breakdown"]:
         rows.append((f"Extra Service: {name}", amount))
     if result["late_fee"] > 0:
-        rows.append((f"Spaetanmeldung: {result['late_label']}", result["late_fee"]))
+        rows.append((f"Spätanmeldung: {result['late_label']}", result["late_fee"]))
     if result["pickup_area_fee"] > 0:
         rows.append((f"Abholgebiet: {result['pickup_area_label']}", result["pickup_area_fee"]))
     if result["late_pickup_fee"] > 0:
-        rows.append((f"Spaetabholung: {result['late_pickup_label']}", result["late_pickup_fee"]))
+        rows.append((f"Spätabholung: {result['late_pickup_label']}", result["late_pickup_fee"]))
     if result["oversize_fee"] > 0:
         rows.append(("Oversize-Zuschlag", result["oversize_fee"]))
     for label, amount in result["carrier_surcharge_breakdown"]:
         rows.append((f"Sonderzuschlag: {label}", amount))
     if result["insurance_fee"] > 0:
-        rows.append(("Hoeherversicherung", result["insurance_fee"]))
+        rows.append(("Höherversicherung", result["insurance_fee"]))
     rows.append(("Gesamtpreis netto", result["total"]))
     return rows
+
+
+def build_case_c_price_bullets(result):
+    """Baut kopierbare Bullet-Points fuer Preisbausteine."""
+    rows = build_case_c_price_rows(result)
+    return "\n".join(f"- {name}: {format_eur(amount)}" for name, amount in rows)
 
 
 def render_case_c_plausibility_checks(
@@ -179,20 +195,20 @@ def render_case_c_plausibility_checks(
     declared_goods_value,
 ):
     """Zeigt operative Ampel-Checks vor dem Tarifvergleich."""
-    st.markdown("### Plausibilitaets-Check")
+    st.markdown("### Plausibilitäts-Check")
     if exp_reasons and lz48_reasons:
         st.error("Beide Carrier sind aktuell ausgeschlossen. Kein Direktangebot senden.")
     elif exp_reasons or lz48_reasons:
-        st.warning("Nur ein Carrier ist verfuegbar. Ausschlussgruende pruefen, bevor versendet wird.")
+        st.warning("Nur ein Carrier ist verfügbar. Ausschlussgründe prüfen, bevor versendet wird.")
     else:
-        st.success("Beide Carrier sind technisch moeglich.")
+        st.success("Beide Carrier sind technisch möglich.")
 
     if needs_deku_check or island_service_selected:
-        st.warning("DeKu-Ruecksprache erforderlich vor finaler Zusage.")
+        st.warning("DeKu-Rücksprache erforderlich vor finaler Zusage.")
     if is_late_pickup and not is_late_registration:
-        st.info("Spaetabholung aktiv, aber keine Spaetanmeldung: nur Spaetabholung wird berechnet.")
+        st.info("Spätabholung aktiv, aber keine Spätanmeldung: nur Spätabholung wird berechnet.")
     if insurance_enabled and declared_goods_value <= 250:
-        st.info("Hoeherversicherung aktiviert, aber Warenwert <= 250 EUR: kein Zuschlag.")
+        st.info("Höherversicherung aktiviert, aber Warenwert <= 250 EUR: kein Zuschlag.")
 
 
 def render_copy_price(label, value, key):
@@ -234,4 +250,4 @@ def render_copy_price(label, value, key):
         height=52,
     )
     st.caption(offer_text)
-    st.caption("Direkt nutzbar fuer Mail, Bamboo und Angebot.")
+    st.caption("Direkt nutzbar für Mail, Bamboo und Angebot.")
