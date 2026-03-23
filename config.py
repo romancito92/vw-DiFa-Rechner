@@ -30,6 +30,14 @@ PARCEL_CONFIG_PATH = Path(__file__).with_name("parcel_tariffs_de.json")
 
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 ORS_DIRECTIONS_URL_TEMPLATE = "https://api.openrouteservice.org/v2/directions/{profile}"
+TANKERKOENIG_LIST_URL = "https://creativecommons.tankerkoenig.de/json/list.php"
+TANKERKOENIG_DEMO_API_KEY = "00000000-0000-0000-0000-000000000002"
+TANKERKOENIG_DEFAULT_LOCATION = {
+    "label": "Hauptstandort 57072 Siegen",
+    "lat": 50.8804,
+    "lng": 7.9845,
+}
+TANKERKOENIG_DEFAULT_RADIUS_KM = 5.0
 
 def _load_ors_api_key():
     """Load ORS key from Streamlit secrets first, then environment."""
@@ -62,6 +70,31 @@ def _load_ors_api_key():
 
 
 DEFAULT_ORS_API_KEY, ORS_API_KEY_SOURCE = _load_ors_api_key()
+
+
+def _load_tankerkoenig_api_key():
+    """Load Tankerkoenig key from Streamlit secrets first, then environment, else demo."""
+    try:
+        direct_secret = st.secrets.get("TANKERKOENIG_API_KEY", "")
+        if isinstance(direct_secret, str) and direct_secret.strip():
+            return direct_secret.strip(), "st.secrets[TANKERKOENIG_API_KEY]"
+
+        scoped = st.secrets.get("tankerkoenig", {})
+        if isinstance(scoped, dict):
+            scoped_key = scoped.get("api_key", "")
+            if isinstance(scoped_key, str) and scoped_key.strip():
+                return scoped_key.strip(), "st.secrets[tankerkoenig.api_key]"
+    except Exception:
+        pass
+
+    env_key = os.getenv("TANKERKOENIG_API_KEY", "").strip()
+    if env_key:
+        return env_key, "env[TANKERKOENIG_API_KEY]"
+
+    return TANKERKOENIG_DEMO_API_KEY, "demo key"
+
+
+DEFAULT_TANKERKOENIG_API_KEY, TANKERKOENIG_API_KEY_SOURCE = _load_tankerkoenig_api_key()
 
 ORS_PROFILE_LABELS = {
     "driving-car": "PKW (driving-car)",

@@ -1,5 +1,58 @@
-﻿import streamlit as st
+import streamlit as st
 import streamlit.components.v1 as components
+
+
+def render_app_styles():
+    """Inject a small, targeted style layer for spacing and visual hierarchy."""
+    st.markdown(
+        """
+        <style>
+        :root {
+            --vw-accent: #e84328;
+            --vw-accent-soft: #b5d6b2;
+        }
+
+        .block-container {
+            max-width: 96rem;
+            padding-top: 1rem;
+            padding-right: 1.6rem;
+            padding-bottom: 1.4rem;
+            padding-left: 1.6rem;
+        }
+
+        div[data-testid="stAlert"] {
+            border-radius: 12px;
+        }
+
+        div[data-testid="stMetric"] {
+            background: rgba(181, 214, 178, 0.14);
+            border: 1px solid rgba(181, 214, 178, 0.48);
+            border-radius: 14px;
+            padding: 0.55rem 0.75rem;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 1.45rem;
+        }
+
+        div[data-testid="stButton"] > button[kind="primary"] {
+            background-color: var(--vw-accent);
+            border-color: var(--vw-accent);
+        }
+
+        div[data-testid="stButton"] > button[kind="primary"]:hover {
+            background-color: #cf381e;
+            border-color: #cf381e;
+        }
+
+        div[data-testid="stExpander"] {
+            border-radius: 14px;
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def format_eur(value):
@@ -16,7 +69,7 @@ def format_eur_per_km(value, km):
 
 
 def render_confidence_box(min_price, max_price, caption, expected_re_margin=None):
-    """Zeigt Preis-Confidence auf Basis der Spanne."""
+    """Zeigt Preiskonfidenz auf Basis der Spanne."""
     span = max_price - min_price
     mid = (min_price + max_price) / 2 if (min_price + max_price) > 0 else 0
     span_pct = (span / mid * 100) if mid > 0 else 0
@@ -38,13 +91,18 @@ def render_confidence_box(min_price, max_price, caption, expected_re_margin=None
         tone = "error"
         hint = "Achtung - Preis bitte genau prüfen."
 
-    st.markdown("**Preis-Confidence**")
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown("**Preiskonfidenz**")
     if expected_re_margin is not None:
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Erwartete RE-Marge", format_eur(expected_re_margin))
-    c2.metric("Confidence", level)
-    c3.metric("Spanne", format_eur(span))
-    c4.metric("Relative Spanne", f"{span_pct:.1f} %")
+        c2.metric("Konfidenz", level)
+        c3.metric("Spanne", format_eur(span))
+        c4.metric("Relative Spanne", f"{span_pct:.1f} %")
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Konfidenz", level)
+        c2.metric("Spanne", format_eur(span))
+        c3.metric("Relative Spanne", f"{span_pct:.1f} %")
     if tone == "success":
         st.success(f"{caption}: {hint}")
     elif tone == "warning":
@@ -99,7 +157,7 @@ def render_case_c_recommendation(exp_result, lz48_result):
 
 
 def render_copy_text_button(label, text, key):
-    """Zeigt einen Copy-Button fuer beliebigen Text."""
+    """Zeigt einen Copy-Button für beliebigen Text."""
     js_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     components.html(
         f"""
@@ -122,7 +180,7 @@ def render_copy_text_button(label, text, key):
 
 
 def _build_case_c_product_label(result):
-    """Kundenfreundliche Produktbezeichnung fuer Modus C."""
+    """Kundenfreundliche Produktbezeichnung für Modus C."""
     tariff_code = result.get("tariff_code", "")
     if tariff_code == "EXP":
         return "EXP - überNacht"
@@ -132,7 +190,7 @@ def _build_case_c_product_label(result):
 
 
 def build_case_c_offer_text(result, alternative_result=None):
-    """Erzeugt Angebots-Textbaustein fuer Modus C."""
+    """Erzeugt Angebots-Textbaustein für Modus C."""
     price_net = format_eur(result["total"]).replace(" €", "")
     main_product = _build_case_c_product_label(result)
     extra_labels = [name for name, amount in result["extras_breakdown"] if amount > 0]
@@ -179,7 +237,7 @@ def build_case_c_price_rows(result):
 
 
 def build_case_c_price_bullets(result):
-    """Baut kopierbare Bullet-Points fuer Preisbausteine."""
+    """Baut kopierbare Bullet-Points für Preisbausteine."""
     rows = build_case_c_price_rows(result)
     return "\n".join(f"- {name}: {format_eur(amount)}" for name, amount in rows)
 
@@ -211,7 +269,7 @@ def render_case_c_plausibility_checks(
         st.info("Höherversicherung aktiviert, aber Warenwert <= 250 EUR: kein Zuschlag.")
 
 
-def render_copy_price(label, value, key):
+def render_copy_price(label, value, key, show_offer_text=True):
     """Zeigt empfohlenen Preis inkl. Copy-Button."""
     formatted = format_eur(value)
     formatted_net = formatted.replace(" €", "")
@@ -249,5 +307,18 @@ def render_copy_price(label, value, key):
         """,
         height=52,
     )
-    st.caption(offer_text)
-    st.caption("Direkt nutzbar für Mail, Bamboo und Angebot.")
+    if show_offer_text:
+        st.caption(offer_text)
+        st.caption("Direkt nutzbar für Mail, Bamboo und Angebot.")
+    else:
+        st.caption("Preis oder Angebotstext direkt kopierbar.")
+
+
+def render_icon_toggle(label, key, help_text, icon_path=None, icon_width=42):
+    """Render a compact inline icon-toggle-help group."""
+    icon_col, toggle_col = st.columns([0.16, 0.84], gap="small", vertical_alignment="center")
+    with icon_col:
+        if icon_path:
+            st.image(icon_path, width=icon_width)
+    with toggle_col:
+        return st.toggle(label, key=key, help=help_text)

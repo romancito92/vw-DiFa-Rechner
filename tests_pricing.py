@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import direktfahrt_rechner as app
+from tankerkoenig_helpers import build_diesel_price_average
 
 
 def base_ctx(**overrides):
@@ -151,6 +152,55 @@ def run_tests():
     over3 = [a for l, a in res_len_3["carrier_surcharge_breakdown"] if "Überlänge" in l][0]
     assert round(over1, 2) == 45.00
     assert round(over3, 2) == 75.00
+
+    # 8) Tankerkoenig-Mittelwert nutzt offene Stationen, wenn vorhanden
+    summary = build_diesel_price_average(
+        [
+            {"name": "A", "isOpen": False, "price": 1.599, "dist": 0.3},
+            {"name": "B", "isOpen": True, "price": 1.629, "dist": 0.1},
+            {"name": "C", "isOpen": True, "price": 1.589, "dist": 1.2},
+        ]
+    )
+    assert round(summary["price"], 3) == 1.609
+    assert summary["station_count"] == 2
+    assert summary["open_station_count"] == 2
+
+    # 9) Fallback auf `diesel`, falls keine `price`-Spalte vorhanden ist
+    summary = build_diesel_price_average(
+        [
+            {"name": "D", "isOpen": True, "diesel": 1.709, "dist": 0.8},
+            {"name": "E", "isOpen": True, "diesel": 1.699, "dist": 1.1},
+        ]
+    )
+    assert round(summary["price"], 3) == 1.704
+
+    # 10) A-Fall ohne Hebebuehne bleibt bei Basis 29 und 1,30 EUR/km
+    result = app.calculate_case_a(92, 72, 0.0, False)
+    assert round(result[4], 2) == 148.60
+    assert round(result[5], 2) == 174.00
+    assert round(result[8], 2) == 29.00
+    assert round(result[9], 2) == 1.30
+    assert round(result[10], 2) == 1.00
+
+    # 11) A-Fall mit Hebebuehne: A.1 +0,15 EUR/km und +10 EUR Basis, A.2 +20 %
+    result = app.calculate_case_a(92, 72, 0.0, True)
+    assert round(result[4], 2) == 172.40
+    assert round(result[5], 2) == 208.80
+    assert round(result[8], 2) == 39.00
+    assert round(result[9], 2) == 1.45
+    assert round(result[10], 2) == 1.20
+
+    # 12) Finale Angebotsrundung: immer auf die naechste ungerade ganze Zahl nach unten
+    assert app.round_down_to_odd_price(58.90) == 57
+    assert app.round_down_to_odd_price(57.90) == 57
+    assert app.round_down_to_odd_price(56.00) == 55
+    assert app.round_down_to_odd_price(55.20) == 55
+
+    # 13) B-Fall EK-Multiplikatoren nutzen dieselbe finale Rundungsregel
+    ek_prices = app.calculate_case_b_ek(200.0)
+    assert ek_prices["EK x 1,3"] == 259
+    assert ek_prices["EK x 1,4"] == 279
+    assert ek_prices["EK x 1,5"] == 299
 
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 

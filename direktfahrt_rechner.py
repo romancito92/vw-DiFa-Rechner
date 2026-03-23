@@ -1,4 +1,6 @@
 ﻿from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import streamlit as st
 
 from config import (
@@ -8,11 +10,17 @@ from config import (
     ORS_PROFILE_LABELS,
     VEHICLE_TO_ORS_PROFILE,
     ORS_PROFILE_TO_VEHICLE,
+    DEFAULT_TANKERKOENIG_API_KEY,
+    TANKERKOENIG_API_KEY_SOURCE,
+    TANKERKOENIG_DEFAULT_LOCATION,
+    TANKERKOENIG_DEFAULT_RADIUS_KM,
 )
 from ors_helpers import get_ors_address_suggestions, get_ors_distance_and_duration
+from tankerkoenig_helpers import get_nearby_diesel_price
 from ui_helpers import (
     format_eur,
     format_eur_per_km,
+    render_app_styles,
     render_confidence_box,
     render_case_c_recommendation,
     render_copy_text_button,
@@ -21,8 +29,15 @@ from ui_helpers import (
     build_case_c_price_bullets,
     render_case_c_plausibility_checks,
     render_copy_price,
+    render_icon_toggle,
 )
-from logic_direct import get_distance_class, calculate_case_a, calculate_case_b_ek, calculate_case_b_table
+from logic_direct import (
+    get_distance_class,
+    calculate_case_a,
+    calculate_case_b_ek,
+    calculate_case_b_table,
+    round_down_to_odd_price,
+)
 from logic_parcel import (
     load_parcel_config,
     get_piece_metrics,
@@ -33,6 +48,16 @@ from logic_parcel import (
 )
 
 
+A_CONSUMPTION_PRESETS = {
+    "Standard/manuell": 10.0,
+    "Fiat Ducato L4H3": 8.0,
+    "Sprinter lang": 10.0,
+    "Koffersprinter": 14.0,
+}
+APP_TIMEZONE = ZoneInfo("Europe/Berlin")
+A_MAIN_SITE_ADDRESS = "Heeserstraße 5, 57072 Siegen"
+
+
 
 
 
@@ -40,23 +65,25 @@ from logic_parcel import (
 
 def render_app_header():
     """Render title with optional logo in the top-right corner."""
+    render_app_styles()
     st.markdown(
         """
         <style>
         div[data-testid="stImage"] img {
             border-radius: 0 !important;
+            object-fit: contain !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    left_col, right_col = st.columns([5, 1])
+    left_col, right_col = st.columns([4.8, 1.4], gap="medium", vertical_alignment="center")
     with left_col:
         st.title("Versandwerk Preisrechner [intern]")
     with right_col:
         logo_path = Path(__file__).with_name("assets").joinpath("logo.png")
         if logo_path.exists():
-            st.image(str(logo_path), use_container_width=True)
+            st.image(str(logo_path), width=220)
 
 
 def sync_b_profile_from_vehicle():
@@ -71,6 +98,104 @@ def sync_b_vehicle_from_profile():
     profile = st.session_state.get("b_ors_profile")
     mapped_vehicle = ORS_PROFILE_TO_VEHICLE.get(profile, "Transporter / Sprinter")
     st.session_state["b_vehicle_type"] = mapped_vehicle
+
+
+def sync_a_consumption_from_preset():
+    """Synchronisiert Verbrauch aus Fahrzeug-Preset in Modus A."""
+    preset = st.session_state.get("a_consumption_preset", "Standard/manuell")
+    preset_value = A_CONSUMPTION_PRESETS.get(preset)
+    if preset_value is not None:
+        st.session_state["a_consumption_manual_override"] = False
+        st.session_state["a_diesel_consumption"] = preset_value
+
+
+def mark_a_consumption_manual_override():
+    """Merkt sich, dass der Verbrauch manuell überschrieben wurde."""
+    st.session_state["a_consumption_manual_override"] = True
+
+
+def fetch_a_diesel_price_from_tankerkoenig():
+    """Lädt einen Dieselpreis nahe dem Hauptstandort in Siegen."""
+    fetched_at = datetime.now(APP_TIMEZONE)
+    try:
+        result = get_nearby_diesel_price(
+            DEFAULT_TANKERKOENIG_API_KEY,
+            TANKERKOENIG_DEFAULT_LOCATION["lat"],
+            TANKERKOENIG_DEFAULT_LOCATION["lng"],
+            TANKERKOENIG_DEFAULT_RADIUS_KM,
+        )
+    except Exception as exc:
+        st.session_state["a_fuel_fetch_error"] = str(exc)
+        st.session_state.pop("a_fuel_fetch_result", None)
+        return
+
+    result["fetched_at"] = fetched_at.strftime("%d.%m.%Y %H:%M:%S")
+    result["fetched_at_iso"] = fetched_at.isoformat()
+    result["api_key_source"] = TANKERKOENIG_API_KEY_SOURCE
+    st.session_state["a_diesel_current"] = round(result["price"], 3)
+    st.session_state["a_fuel_fetch_result"] = result
+    st.session_state.pop("a_fuel_fetch_error", None)
+
+
+def ensure_a_diesel_price_loaded(max_age_minutes=15):
+    """Lädt den Dieselpreis automatisch, wenn noch keiner vorliegt oder er veraltet ist."""
+    result = st.session_state.get("a_fuel_fetch_result")
+    if not result:
+        fetch_a_diesel_price_from_tankerkoenig()
+        return
+
+    fetched_at_iso = result.get("fetched_at_iso")
+    if not fetched_at_iso:
+        fetch_a_diesel_price_from_tankerkoenig()
+        return
+
+    try:
+        fetched_at = datetime.fromisoformat(fetched_at_iso)
+    except ValueError:
+        fetch_a_diesel_price_from_tankerkoenig()
+        return
+
+    age_minutes = (datetime.now(APP_TIMEZONE) - fetched_at).total_seconds() / 60
+    if age_minutes >= max_age_minutes:
+        fetch_a_diesel_price_from_tankerkoenig()
+
+
+def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, include_approach):
+    """Berechnet optional die Anfahrt vom Hauptstandort plus die eigentliche Strecke."""
+    route_segments = []
+
+    if include_approach:
+        approach_km, approach_minutes = get_ors_distance_and_duration(
+            A_MAIN_SITE_ADDRESS,
+            start_address,
+            api_key,
+            profile,
+        )
+        route_segments.append(
+            {
+                "label": "Hauptstandort -> Startadresse",
+                "distance_km": approach_km,
+                "duration_minutes": approach_minutes,
+            }
+        )
+
+    trip_km, trip_minutes = get_ors_distance_and_duration(
+        start_address,
+        target_address,
+        api_key,
+        profile,
+    )
+    route_segments.append(
+        {
+            "label": "Startadresse -> Zieladresse",
+            "distance_km": trip_km,
+            "duration_minutes": trip_minutes,
+        }
+    )
+
+    total_distance_km = sum(segment["distance_km"] for segment in route_segments)
+    total_duration_minutes = sum(segment["duration_minutes"] for segment in route_segments)
+    return total_distance_km, total_duration_minutes, route_segments
 
 
 
@@ -93,13 +218,15 @@ def address_input_with_autofill(label, query_key, api_key):
 
         if suggestions:
             st.caption(f"Vorschläge für {label}:")
-            shown = suggestions[:5]
-            cols = st.columns(len(shown))
+            shown = suggestions[:4]
             for i, suggestion in enumerate(shown):
-                with cols[i]:
-                    if st.button(suggestion, key=f"{query_key}_sugg_{i}"):
-                        st.session_state[pending_key] = suggestion
-                        st.rerun()
+                if st.button(
+                    suggestion,
+                    key=f"{query_key}_sugg_{i}",
+                    width="stretch",
+                ):
+                    st.session_state[pending_key] = suggestion
+                    st.rerun()
 
     return st.session_state.get(query_key, selected).strip()
 
@@ -192,7 +319,7 @@ def show_case_c():
         with c3:
             st.metric("Anzahl Packstücke", len(st.session_state["c_piece_ids"]))
         with c4:
-            if st.button("🔄 Neue Sendung", key="c_reset_shipment", use_container_width=True):
+            if st.button("🔄 Neue Sendung", key="c_reset_shipment", width="stretch"):
                 for key in list(st.session_state.keys()):
                     if key.startswith("c_"):
                         del st.session_state[key]
@@ -253,7 +380,7 @@ def show_case_c():
                     )
                 with p5:
                     st.caption("")
-                    if idx > 1 and st.button("🗑️ Löschen", key=f"c_delete_piece_{piece_id}", use_container_width=True):
+                    if idx > 1 and st.button("🗑️ Löschen", key=f"c_delete_piece_{piece_id}", width="stretch"):
                         st.session_state["c_piece_ids"] = [pid for pid in st.session_state["c_piece_ids"] if pid != piece_id]
                         st.rerun()
                 pieces.append(
@@ -287,7 +414,7 @@ def show_case_c():
                     "Gurtmaß cm": f"{metrics['girth_plus_length']:.1f}",
                 }
             )
-        st.dataframe(piece_rows, use_container_width=True, hide_index=True)
+        st.dataframe(piece_rows, width="stretch", hide_index=True)
 
     selected_services = []
     selected_exp_services = []
@@ -632,116 +759,230 @@ def show_case_a():
     st.subheader("A - Selbst fahren")
 
     if "a_km" not in st.session_state:
-        st.session_state["a_km"] = 100.0
+        st.session_state["a_km"] = 92.0
     if "a_minutes" not in st.session_state:
-        st.session_state["a_minutes"] = 90
+        st.session_state["a_minutes"] = 72
+    st.session_state["a_diesel_base"] = 1.700
+    if "a_diesel_current" not in st.session_state:
+        st.session_state["a_diesel_current"] = 2.100
+    if "a_diesel_consumption" not in st.session_state:
+        st.session_state["a_diesel_consumption"] = 10.0
+    if "a_consumption_preset" not in st.session_state:
+        st.session_state["a_consumption_preset"] = "Standard/manuell"
+    if "a_consumption_manual_override" not in st.session_state:
+        st.session_state["a_consumption_manual_override"] = False
+    if "a_include_hq_approach" not in st.session_state:
+        st.session_state["a_include_hq_approach"] = True
+    if "a_liftgate_required" not in st.session_state:
+        st.session_state["a_liftgate_required"] = False
+    if "a_ors_feedback" not in st.session_state:
+        st.session_state["a_ors_feedback"] = None
+
+    if (
+        st.session_state["a_consumption_preset"] == "Standard/manuell"
+        and not st.session_state["a_consumption_manual_override"]
+    ):
+        st.session_state["a_diesel_consumption"] = 10.0
 
     st.markdown("### 1. Eingabe")
-    with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
-        ors_col1, ors_col2 = st.columns(2)
-        api_key = DEFAULT_ORS_API_KEY
-        if not api_key:
-            st.warning(
-                "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` in `.streamlit/secrets.toml` "
-                "oder als Umgebungsvariable."
-            )
-        else:
-            st.caption(
-                f"ORS API-Key geladen ({ORS_API_KEY_SOURCE}, L\u00e4nge: {len(api_key)} Zeichen)."
-            )
-        _, ors_col4 = st.columns([1.2, 1])
-        with ors_col4:
-            profile = st.selectbox(
-                "Fahrprofil",
-                ["driving-car", "driving-hgv", "cycling-regular", "foot-walking"],
-                index=0,
-                key="a_ors_profile",
-                format_func=lambda p: ORS_PROFILE_LABELS.get(p, p),
-            )
-
-        with ors_col1:
-            start_address = address_input_with_autofill(
-                "Startadresse",
-                "a_start_address",
-                api_key,
-            )
-        with ors_col2:
-            target_address = address_input_with_autofill(
-                "Zieladresse",
-                "a_target_address",
-                api_key,
-            )
-
-        if st.button("Distanz und Fahrzeit von ORS holen", key="a_fetch_ors"):
-            if not start_address or not target_address:
-                st.error("Bitte Startadresse und Zieladresse ausfüllen.")
-            else:
-                try:
-                    distance_km, duration_minutes = get_ors_distance_and_duration(
-                        start_address,
-                        target_address,
+    input_col, options_col = st.columns([1.15, 1], gap="large")
+    with input_col:
+        with st.container(border=True):
+            st.markdown("**Strecke und Fahrzeit**")
+            with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
+                address_col, action_col = st.columns([1.45, 0.85], gap="large")
+                api_key = DEFAULT_ORS_API_KEY
+                profile = "driving-car"
+                if not api_key:
+                    st.warning(
+                        "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` in `.streamlit/secrets.toml` "
+                        "oder als Umgebungsvariable."
+                    )
+                else:
+                    st.caption(
+                        f"ORS API-Key geladen ({ORS_API_KEY_SOURCE}, Länge: {len(api_key)} Zeichen)."
+                    )
+                with address_col:
+                    start_address = address_input_with_autofill(
+                        "Startadresse",
+                        "a_start_address",
                         api_key,
-                        profile,
                     )
-                    st.session_state["a_km"] = round(distance_km, 1)
-                    st.session_state["a_minutes"] = int(round(duration_minutes))
-                    st.success(
-                        f"ORS erfolgreich: {distance_km:.1f} km, {duration_minutes:.1f} Minuten"
+                    target_address = address_input_with_autofill(
+                        "Zieladresse",
+                        "a_target_address",
+                        api_key,
                     )
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"ORS-Fehler: {exc}")
+                with action_col:
+                    st.toggle(
+                        "Anfahrt ab Siegen City einrechnen",
+                        key="a_include_hq_approach",
+                        help="Berücksichtigt die Anfahrt von Heeserstraße 5, 57072 Siegen zur Startadresse.",
+                    )
+                    include_hq_approach = st.session_state["a_include_hq_approach"]
+                    if st.button(
+                        "Distanz und Fahrzeit von ORS holen",
+                        key="a_fetch_ors",
+                        type="primary",
+                    ):
+                        if not start_address or not target_address:
+                            st.session_state["a_ors_feedback"] = {
+                                "state": "error",
+                                "message": "Bitte Startadresse und Zieladresse ausfüllen.",
+                            }
+                        else:
+                            with st.status(
+                                "ORS-Daten werden gerade abgerufen …",
+                                expanded=False,
+                            ) as status:
+                                try:
+                                    distance_km, duration_minutes, route_segments = fetch_case_a_ors_totals(
+                                        start_address,
+                                        target_address,
+                                        api_key,
+                                        profile,
+                                        include_hq_approach,
+                                    )
+                                    st.session_state["a_km"] = round(distance_km, 1)
+                                    st.session_state["a_minutes"] = int(round(duration_minutes))
+                                    st.session_state["a_ors_last_result"] = {"segments": route_segments}
+                                    st.session_state["a_ors_feedback"] = {
+                                        "state": "success",
+                                        "values": f"{distance_km:.1f} km | {duration_minutes:.0f} Minuten",
+                                    }
+                                    status.update(
+                                        label=f"Daten übernommen: {distance_km:.0f} km | {duration_minutes:.0f} Minuten",
+                                        state="complete",
+                                    )
+                                except Exception as exc:
+                                    st.session_state["a_ors_feedback"] = {
+                                        "state": "error",
+                                        "message": f"ORS-Fehler: {exc}",
+                                    }
+                                    status.update(label="ORS-Abruf fehlgeschlagen.", state="error")
 
-    col1, col2, _ = st.columns([1, 1, 2])
-    with col1:
-        km = st.number_input("Kilometer", min_value=0.0, step=1.0, key="a_km")
-    with col2:
-        one_way_minutes = st.number_input(
-            "Fahrtdauer einfach (Minuten)", min_value=0, step=1, key="a_minutes"
-        )
+                    ors_feedback = st.session_state.get("a_ors_feedback")
+                    if ors_feedback:
+                        if ors_feedback["state"] == "error":
+                            st.error(ors_feedback["message"])
 
-    st.markdown("**Optional: Spritaufschlag für A.1**")
-    use_fuel_adjustment = st.checkbox(
-        "Spritpreisanpassung auf A.1 anwenden",
-        value=False,
-        key="a_use_fuel_adjustment",
-        help="Berechnet einen Aufschlag pro km aus Dieselpreis-Differenz und Verbrauch.",
-    )
-    a1_extra_per_km = 0.0
-    diesel_diff = 0.0
-    consumption_l_per_100km = 0.0
-    if use_fuel_adjustment:
-        f1, f2, f3 = st.columns(3)
-        with f1:
-            diesel_base = st.number_input(
-                "Diesel-Basispreis (EUR/L)",
-                min_value=0.0,
-                value=1.70,
-                step=0.01,
-                key="a_diesel_base",
+                ors_last_result = st.session_state.get("a_ors_last_result")
+                if ors_last_result:
+                    segment_text = " | ".join(
+                        f"{segment['label']}: {segment['distance_km']:.1f} km, {segment['duration_minutes']:.0f} min"
+                        for segment in ors_last_result.get("segments", [])
+                    )
+                    st.caption(f"Letzte ORS-Berechnung: {segment_text}")
+
+            col1, col2 = st.columns(2, gap="large")
+            with col1:
+                km = st.number_input("Kilometer (One-Way)", min_value=0.0, step=1.0, key="a_km")
+            with col2:
+                one_way_minutes = st.number_input(
+                    "Fahrtdauer einfach (Minuten)", min_value=0, step=1, key="a_minutes"
+                )
+
+    with options_col:
+        with st.container(border=True):
+            st.markdown("**Fahrzeug und Zuschläge**")
+            option_col1, option_col2 = st.columns([1.05, 0.95], gap="large")
+            with option_col1:
+                st.selectbox(
+                    "Fahrzeug (Preset)",
+                    list(A_CONSUMPTION_PRESETS.keys()),
+                    key="a_consumption_preset",
+                    on_change=sync_a_consumption_from_preset,
+                )
+            with option_col2:
+                liftgate_icon_path = Path(__file__).with_name("assets").joinpath("liftgate_icon.svg")
+                render_icon_toggle(
+                    "Hebebühnenzuschlag",
+                    "a_liftgate_required",
+                    "A.1: 39,00 EUR Basis und +0,15 EUR/km. A.2: +20 %. Nur, falls kundenseitig erwünscht/erforderlich.",
+                    icon_path=str(liftgate_icon_path) if liftgate_icon_path.exists() else None,
+                )
+
+            use_fuel_adjustment = st.checkbox(
+                "Spritpreisanpassung auf A.1 anwenden",
+                value=True,
+                key="a_use_fuel_adjustment",
+                help="Berechnet einen Aufschlag pro km aus Dieselpreis-Differenz und Verbrauch.",
             )
-        with f2:
-            diesel_current = st.number_input(
-                "Diesel aktuell (EUR/L)",
-                min_value=0.0,
-                value=2.00,
-                step=0.01,
-                key="a_diesel_current",
-            )
-        with f3:
-            consumption_l_per_100km = st.number_input(
-                "Verbrauch (L/100 km)",
-                min_value=0.0,
-                value=11.0,
-                step=0.1,
-                key="a_diesel_consumption",
-            )
-        diesel_diff = max(0.0, diesel_current - diesel_base)
-        a1_extra_per_km = diesel_diff * (consumption_l_per_100km / 100.0)
-        st.caption(
-            f"Aufschlag A.1: {a1_extra_per_km:.3f} EUR/km "
-            f"(Differenz {diesel_diff:.2f} EUR/L)"
-        )
+            a1_extra_per_km = 0.0
+            diesel_diff = 0.0
+            consumption_l_per_100km = 0.0
+            if use_fuel_adjustment:
+                ensure_a_diesel_price_loaded()
+                st.caption(
+                    f"Tankerkönig-Abrufbasis: {TANKERKOENIG_DEFAULT_LOCATION['label']} "
+                    f"({TANKERKOENIG_DEFAULT_LOCATION['lat']:.4f}, {TANKERKOENIG_DEFAULT_LOCATION['lng']:.4f}), "
+                    f"Radius {TANKERKOENIG_DEFAULT_RADIUS_KM:.0f} km."
+                )
+                st.caption("Der Dieselpreis wird automatisch geladen und etwa alle 15 Minuten aktualisiert.")
+                if TANKERKOENIG_API_KEY_SOURCE == "demo key":
+                    st.info(
+                        "Aktuell ist der Tankerkönig-Demo-Key aktiv. Die API liefert damit Testdaten, keine echten Marktpreise."
+                    )
+
+                f1, f2, f3 = st.columns([1, 1.15, 1], gap="medium")
+                with f1:
+                    diesel_base = st.number_input(
+                        "Diesel-Basispreis (EUR/L)",
+                        min_value=0.0,
+                        step=0.001,
+                        format="%.3f",
+                        key="a_diesel_base",
+                        disabled=True,
+                    )
+                with f2:
+                    diesel_current = st.number_input(
+                        "Diesel aktuell (EUR/L)",
+                        min_value=0.0,
+                        step=0.001,
+                        format="%.3f",
+                        key="a_diesel_current",
+                    )
+                    st.button(
+                        "Tagespreis laden",
+                        key="a_fetch_tankerkoenig",
+                        on_click=fetch_a_diesel_price_from_tankerkoenig,
+                        help="Lädt einen einfachen Durchschnitt der Dieselpreise nahe unserem Hauptstandort in Siegen.",
+                    )
+                with f3:
+                    consumption_l_per_100km = st.number_input(
+                        "Verbrauch (L/100 km)",
+                        min_value=0.0,
+                        step=0.1,
+                        key="a_diesel_consumption",
+                        on_change=mark_a_consumption_manual_override,
+                    )
+                fuel_fetch_error = st.session_state.get("a_fuel_fetch_error")
+                fuel_fetch_result = st.session_state.get("a_fuel_fetch_result")
+                if fuel_fetch_error:
+                    st.error(f"Tankerkönig-Abruf fehlgeschlagen: {fuel_fetch_error}")
+                elif fuel_fetch_result:
+                    st.caption(
+                        f"Aktueller Dieselpreis (Durchschnitt): {fuel_fetch_result['price']:.3f} EUR/L | "
+                        f"Basis: {fuel_fetch_result['station_count']} Stationen "
+                        f"im Radius von {fuel_fetch_result['radius_km']:.0f} km"
+                        + (
+                            f", davon {fuel_fetch_result['open_station_count']} offen"
+                            if fuel_fetch_result['open_station_count'] > 0
+                            else ""
+                        )
+                        + " | "
+                        f"Abruf: {fuel_fetch_result['fetched_at']} | Key: {fuel_fetch_result['api_key_source']}"
+                    )
+                diesel_diff = max(0.0, diesel_current - diesel_base)
+                a1_extra_per_km = diesel_diff * (consumption_l_per_100km / 100.0)
+                st.caption(
+                    f"Aufschlag A.1: {a1_extra_per_km:.3f} EUR/km "
+                    f"(Differenz {diesel_diff:.2f} EUR/L)"
+                )
+            else:
+                diesel_base = st.session_state["a_diesel_base"]
+                diesel_current = st.session_state["a_diesel_current"]
+                consumption_l_per_100km = st.session_state["a_diesel_consumption"]
 
     (
         lower_price,
@@ -752,13 +993,22 @@ def show_case_a():
         price_a2,
         price_a1_base,
         fuel_surcharge_total,
-    ) = calculate_case_a(km, one_way_minutes, a1_extra_per_km)
+        a1_base_fee,
+        a1_rate_per_km,
+        a2_multiplier,
+    ) = calculate_case_a(
+        km,
+        one_way_minutes,
+        a1_extra_per_km,
+        st.session_state["a_liftgate_required"],
+    )
+    rounded_lower_price = round_down_to_odd_price(lower_price)
+    rounded_mid_price = round_down_to_odd_price(price_mid)
+    rounded_upper_price = round_down_to_odd_price(upper_price)
+    rounded_price_a1 = round_down_to_odd_price(price_a1)
+    rounded_price_a2 = round_down_to_odd_price(price_a2)
 
-    st.divider()
     st.markdown("### 2. Ergebnis")
-    st.markdown("### VK-Vorschläge")
-    st.info("Alle folgenden Werte sind VK-Vorschläge (Verkaufspreise) für den Kunden.")
-
     lower_source = (
         "km-basiert (A.1 Formel)"
         if price_a1 <= price_a2
@@ -770,66 +1020,14 @@ def show_case_a():
         else "km-basiert (A.1 Formel)"
     )
     mid_source = "gemischt (Mittelwert aus A.1 und A.2)"
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("Untergrenze (VK)", format_eur(lower_price))
-        st.caption(format_eur_per_km(lower_price, km))
-        st.caption(lower_source)
-    with c2:
-        st.metric("Mittelwert (VK)", format_eur(price_mid))
-        st.caption(format_eur_per_km(price_mid, km))
-        st.caption(mid_source)
-    with c3:
-        st.metric("Obergrenze (VK)", format_eur(upper_price))
-        st.caption(format_eur_per_km(upper_price, km))
-        st.caption(upper_source)
-
-    st.markdown("**Preis für Angebot auswählen**")
     if "a_selected_option" not in st.session_state:
         st.session_state["a_selected_option"] = "Mittelwert"
 
-    current_a_option = st.session_state["a_selected_option"]
-    s1, s2, s3 = st.columns(3)
-    with s1:
-        a_lower_active = current_a_option == "Untergrenze"
-        if st.button(
-            "✓ Untergrenze" if a_lower_active else "Untergrenze",
-            key="a_pick_lower",
-            use_container_width=True,
-            type="primary" if a_lower_active else "secondary",
-        ):
-            st.session_state["a_selected_option"] = "Untergrenze"
-            st.rerun()
-        st.caption(lower_source)
-    with s2:
-        a_mid_active = current_a_option == "Mittelwert"
-        if st.button(
-            "✓ Mittelwert" if a_mid_active else "Mittelwert",
-            key="a_pick_mid",
-            use_container_width=True,
-            type="primary" if a_mid_active else "secondary",
-        ):
-            st.session_state["a_selected_option"] = "Mittelwert"
-            st.rerun()
-        st.caption(mid_source)
-    with s3:
-        a_upper_active = current_a_option == "Obergrenze"
-        if st.button(
-            "✓ Obergrenze" if a_upper_active else "Obergrenze",
-            key="a_pick_upper",
-            use_container_width=True,
-            type="primary" if a_upper_active else "secondary",
-        ):
-            st.session_state["a_selected_option"] = "Obergrenze"
-            st.rerun()
-        st.caption(upper_source)
-
     selected_option = st.session_state["a_selected_option"]
     selected_prices = {
-        "Untergrenze": lower_price,
-        "Mittelwert": price_mid,
-        "Obergrenze": upper_price,
+        "Untergrenze": rounded_lower_price,
+        "Mittelwert": rounded_mid_price,
+        "Obergrenze": rounded_upper_price,
     }
     selected_sources = {
         "Untergrenze": lower_source,
@@ -842,44 +1040,116 @@ def show_case_a():
         "Obergrenze": "upper",
     }
 
-    st.caption(
-        f"Aktive Auswahl: {selected_option} ({selected_sources[selected_option]})"
-    )
-    render_confidence_box(
-        lower_price,
-        upper_price,
-        "A-Modell (A.1 vs. A.2)",
-    )
-    render_copy_price(
-        "Empfohlener Preis",
-        selected_prices[selected_option],
-        f"a_{selected_key[selected_option]}",
-    )
+    result_col, summary_col = st.columns([1.3, 1], gap="large")
+    with result_col:
+        with st.container(border=True):
+            st.markdown("**VK-Vorschläge**")
+            st.caption("Alle folgenden Werte sind VK-Vorschläge (Verkaufspreise) für den Kunden.")
+            c1, c2, c3 = st.columns(3, gap="medium")
+            with c1:
+                st.metric("Untergrenze (VK)", format_eur(rounded_lower_price))
+                st.caption(format_eur_per_km(rounded_lower_price, km))
+                st.caption(lower_source)
+            with c2:
+                st.metric("Mittelwert (VK)", format_eur(rounded_mid_price))
+                st.caption(format_eur_per_km(rounded_mid_price, km))
+                st.caption(mid_source)
+            with c3:
+                st.metric("Obergrenze (VK)", format_eur(rounded_upper_price))
+                st.caption(format_eur_per_km(rounded_upper_price, km))
+                st.caption(upper_source)
 
-    st.markdown("**Kurze Herleitung**")
-    if use_fuel_adjustment:
+            st.markdown("**Preis für Angebot auswählen**")
+            current_a_option = st.session_state["a_selected_option"]
+            s1, s2, s3 = st.columns(3)
+            with s1:
+                a_lower_active = current_a_option == "Untergrenze"
+                if st.button(
+                    "✓ Untergrenze" if a_lower_active else "Untergrenze",
+                    key="a_pick_lower",
+                    width="stretch",
+                    type="primary" if a_lower_active else "secondary",
+                ):
+                    st.session_state["a_selected_option"] = "Untergrenze"
+                    st.rerun()
+                st.caption(lower_source)
+            with s2:
+                a_mid_active = current_a_option == "Mittelwert"
+                if st.button(
+                    "✓ Mittelwert" if a_mid_active else "Mittelwert",
+                    key="a_pick_mid",
+                    width="stretch",
+                    type="primary" if a_mid_active else "secondary",
+                ):
+                    st.session_state["a_selected_option"] = "Mittelwert"
+                    st.rerun()
+                st.caption(mid_source)
+            with s3:
+                a_upper_active = current_a_option == "Obergrenze"
+                if st.button(
+                    "✓ Obergrenze" if a_upper_active else "Obergrenze",
+                    key="a_pick_upper",
+                    width="stretch",
+                    type="primary" if a_upper_active else "secondary",
+                ):
+                    st.session_state["a_selected_option"] = "Obergrenze"
+                    st.rerun()
+                st.caption(upper_source)
+
+    with summary_col:
+        with st.container(border=True):
+            st.markdown("**Aktive Auswahl**")
+            st.caption(f"{selected_option} ({selected_sources[selected_option]})")
+            render_copy_price(
+                "Empfohlener Preis",
+                selected_prices[selected_option],
+                f"a_{selected_key[selected_option]}",
+                show_offer_text=False,
+            )
+        with st.container(border=True):
+            render_confidence_box(
+                rounded_lower_price,
+                rounded_upper_price,
+                "A-Modell (A.1 vs. A.2)",
+            )
+
+    with st.expander("Kurze Herleitung", expanded=False):
+        a1_formula_label = "A.1 Formel"
+        if use_fuel_adjustment:
+            a1_formula_label += " (mit Spritaufschlag)"
+        if st.session_state["a_liftgate_required"]:
+            a1_formula_label += " + Hebebühnenzuschlag"
+
+        a1_formula_text = (
+            f"{a1_base_fee:,.2f} EUR + ({a1_rate_per_km:,.2f} EUR x {km:.1f} km)"
+        ).replace(",", "X").replace(".", ",").replace("X", ".")
+        if use_fuel_adjustment:
+            st.write(
+                f"{a1_formula_label}: "
+                f"{a1_formula_text} + "
+                f"({a1_extra_per_km:.3f} EUR/km x {km:.1f} km) = {format_eur(rounded_price_a1)}"
+            )
+            st.caption(
+                f"Spritaufschlag gesamt: {format_eur(fuel_surcharge_total)} "
+                f"(Differenz {diesel_diff:.2f} EUR/L, Verbrauch {consumption_l_per_100km:.1f} L/100 km)"
+            )
+        else:
+            st.write(f"{a1_formula_label}: {a1_formula_text} = {format_eur(rounded_price_a1)}")
+        a2_base_price = price_a2 / a2_multiplier if a2_multiplier else price_a2
         st.write(
-            "A.1 Formel (mit Spritaufschlag): "
-            f"29,00 EUR + (1,30 EUR x {km:.1f} km) + "
-            f"({a1_extra_per_km:.3f} EUR/km x {km:.1f} km) = {format_eur(price_a1)}"
+            "A.2 Formel: "
+            f"(2 x {one_way_minutes} min + 30 min) = {total_minutes:.0f} min, "
+            f"das entspricht {total_minutes / 60:.2f} h x 60 EUR = {format_eur(a2_base_price)}"
+            + (
+                f" x {a2_multiplier:.1f} = {format_eur(rounded_price_a2)}"
+                if a2_multiplier != 1.0
+                else f" -> final {format_eur(rounded_price_a2)}"
+            )
         )
-        st.caption(
-            f"Spritaufschlag gesamt: {format_eur(fuel_surcharge_total)} "
-            f"(Differenz {diesel_diff:.2f} EUR/L, Verbrauch {consumption_l_per_100km:.1f} L/100 km)"
-        )
-    else:
         st.write(
-            f"A.1 Formel: 29,00 EUR + (1,30 EUR x {km:.1f} km) = {format_eur(price_a1)}"
+            f"Dynamische Sortierung: Untergrenze = {format_eur(rounded_lower_price)}, "
+            f"Obergrenze = {format_eur(rounded_upper_price)}"
         )
-    st.write(
-        "A.2 Formel: "
-        f"(2 x {one_way_minutes} min + 30 min) = {total_minutes:.0f} min, "
-        f"das entspricht {total_minutes / 60:.2f} h x 60 â‚¬ = {format_eur(price_a2)}"
-    )
-    st.write(
-        f"Dynamische Sortierung: Untergrenze = {format_eur(lower_price)}, "
-        f"Obergrenze = {format_eur(upper_price)}"
-    )
 
 def show_case_b():
     st.subheader("B - Extern vergeben")
@@ -894,6 +1164,8 @@ def show_case_b():
         st.session_state["b_vehicle_type"] = ORS_PROFILE_TO_VEHICLE.get(
             st.session_state["b_ors_profile"], "Transporter / Sprinter"
         )
+    if "b_ors_feedback" not in st.session_state:
+        st.session_state["b_ors_feedback"] = None
     with st.container(border=True):
         st.markdown("### 1. Eingabe")
         with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
@@ -931,27 +1203,53 @@ def show_case_b():
                     api_key_b,
                 )
 
-            if st.button("Distanz von ORS holen", key="b_fetch_ors"):
-                if not start_address_b or not target_address_b:
-                    st.error("Bitte Startadresse und Zieladresse ausfüllen.")
-                else:
-                    try:
-                        distance_km_b, duration_minutes_b = get_ors_distance_and_duration(
-                            start_address_b,
-                            target_address_b,
-                            api_key_b,
-                            profile_b,
-                        )
-                        st.session_state["b_km"] = round(distance_km_b, 1)
-                        st.session_state["b_ors_duration_minutes"] = int(
-                            round(duration_minutes_b)
-                        )
-                        st.success(
-                            f"ORS erfolgreich: {distance_km_b:.1f} km, {duration_minutes_b:.1f} Minuten"
-                        )
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"ORS-Fehler: {exc}")
+            action_col, feedback_col = st.columns([0.34, 0.66], gap="medium", vertical_alignment="center")
+            with feedback_col:
+                feedback_placeholder = st.empty()
+
+            with action_col:
+                if st.button(
+                    "Distanz und Fahrzeit von ORS holen",
+                    key="b_fetch_ors",
+                    type="primary",
+                ):
+                    if not start_address_b or not target_address_b:
+                        st.session_state["b_ors_feedback"] = {
+                            "state": "error",
+                            "message": "Bitte Startadresse und Zieladresse ausfüllen.",
+                        }
+                    else:
+                        with feedback_placeholder.container():
+                            with st.spinner("ORS-Daten werden gerade abgerufen …"):
+                                try:
+                                    distance_km_b, duration_minutes_b = get_ors_distance_and_duration(
+                                        start_address_b,
+                                        target_address_b,
+                                        api_key_b,
+                                        profile_b,
+                                    )
+                                    st.session_state["b_km"] = round(distance_km_b, 1)
+                                    st.session_state["b_ors_duration_minutes"] = int(
+                                        round(duration_minutes_b)
+                                    )
+                                    st.session_state["b_ors_feedback"] = {
+                                        "state": "success",
+                                        "values": f"{distance_km_b:.0f} km | {duration_minutes_b:.0f} Minuten",
+                                    }
+                                except Exception as exc:
+                                    st.session_state["b_ors_feedback"] = {
+                                        "state": "error",
+                                        "message": f"ORS-Fehler: {exc}",
+                                    }
+
+            b_ors_feedback = st.session_state.get("b_ors_feedback")
+            if b_ors_feedback:
+                if b_ors_feedback["state"] == "success":
+                    feedback_placeholder.success(
+                        f"Daten übernommen: {b_ors_feedback['values']}",
+                    )
+                elif b_ors_feedback["state"] == "error":
+                    feedback_placeholder.error(b_ors_feedback["message"])
 
         col1, col2, col3 = st.columns([1, 1.4, 1])
         with col1:
@@ -1035,7 +1333,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_ek13_active else ''}EK x 1,3: {format_eur(b_options['EK x 1,3'])}",
                 key="b_pick_ek_13",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_ek13_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,3"
@@ -1046,7 +1344,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_ek14_active else ''}EK x 1,4: {format_eur(b_options['EK x 1,4'])}",
                 key="b_pick_ek_14",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_ek14_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,4"
@@ -1057,7 +1355,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_ek15_active else ''}EK x 1,5: {format_eur(b_options['EK x 1,5'])}",
                 key="b_pick_ek_15",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_ek15_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,5"
@@ -1094,9 +1392,9 @@ def show_case_b():
         b2_vk_mid_label = f"B2 Mittel x{str(b2_factor_mid).replace('.', ',')}"
         b2_vk_max_label = f"B2 Max x{str(b2_factor_max).replace('.', ',')}"
 
-        b2_vk_min = table_ek_min * b2_factor_min
-        b2_vk_mid = table_ek_mid * b2_factor_mid
-        b2_vk_max = table_ek_max * b2_factor_max
+        b2_vk_min = round_down_to_odd_price(table_ek_min * b2_factor_min)
+        b2_vk_mid = round_down_to_odd_price(table_ek_mid * b2_factor_mid)
+        b2_vk_max = round_down_to_odd_price(table_ek_max * b2_factor_max)
 
         b_options[b2_vk_min_label] = b2_vk_min
         b_options[b2_vk_mid_label] = b2_vk_mid
@@ -1112,7 +1410,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_tab_min_active else ''}{b2_vk_min_label}: {format_eur(b2_vk_min)}",
                 key="b_pick_tab_min",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_tab_min_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_min_label
@@ -1125,7 +1423,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_tab_mid_active else ''}{b2_vk_mid_label}: {format_eur(b2_vk_mid)}",
                 key="b_pick_tab_mid",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_tab_mid_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_mid_label
@@ -1138,7 +1436,7 @@ def show_case_b():
             if st.button(
                 f"{'✓ ' if b_tab_max_active else ''}{b2_vk_max_label}: {format_eur(b2_vk_max)}",
                 key="b_pick_tab_max",
-                use_container_width=True,
+                width="stretch",
                 type="primary" if b_tab_max_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_max_label
@@ -1178,23 +1476,28 @@ def main():
     st.set_page_config(page_title="Versandwerk Preisrechner [intern]", layout="wide")
 
     render_app_header()
-    st.caption("Interner MVP für Preisfindung: Direktfahrt und Paketversand")
+    cfg_caption = None
+    meta_col1, meta_col2 = st.columns([1.15, 1], gap="large")
+    with meta_col1:
+        st.caption("Interner MVP für Preisfindung: Direktfahrt und Paketversand")
     try:
         cfg_meta = load_parcel_config().get("meta", {})
-        st.caption(
+        cfg_caption = (
             f"Tarifkonfiguration: v{cfg_meta.get('version', '-')}"
             + (f" | Stand: {cfg_meta.get('tariff_date')}" if cfg_meta.get("tariff_date") else "")
         )
     except Exception:
-        pass
+        cfg_caption = None
+    with meta_col2:
+        if cfg_caption:
+            st.caption(cfg_caption)
 
     mode = st.radio(
         "Bitte Modus wählen",
         ["A - Selbst fahren", "B - Extern vergeben", "C - Paketversand Deutschland"],
         horizontal=True,
+        label_visibility="collapsed",
     )
-
-    st.divider()
 
     if mode == "A - Selbst fahren":
         show_case_a()
@@ -1206,6 +1509,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
