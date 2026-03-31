@@ -823,7 +823,7 @@ def show_case_a():
         st.session_state["a_minutes"] = 72
     st.session_state["a_diesel_base"] = 1.700
     if "a_diesel_current" not in st.session_state:
-        st.session_state["a_diesel_current"] = 2.100
+        st.session_state["a_diesel_current"] = 0.0
     if "a_diesel_consumption" not in st.session_state:
         st.session_state["a_diesel_consumption"] = 10.0
     if "a_consumption_preset" not in st.session_state:
@@ -857,10 +857,6 @@ def show_case_a():
                     st.warning(
                         "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` auf Root-Ebene in den "
                         "Streamlit-Secrets oder alternativ als Umgebungsvariable."
-                    )
-                else:
-                    st.caption(
-                        f"ORS API-Key geladen ({ors_api.source}, Länge: {len(api_key)} Zeichen)."
                     )
                 with address_col:
                     start_address = address_input_with_autofill(
@@ -967,7 +963,7 @@ def show_case_a():
                 )
 
             use_fuel_adjustment = st.checkbox(
-                "Spritpreisanpassung auf A.1 anwenden",
+                "Spritpreisanpassung anwenden",
                 value=True,
                 key="a_use_fuel_adjustment",
                 help="Berechnet einen Aufschlag pro km aus Dieselpreis-Differenz und Verbrauch.",
@@ -977,21 +973,10 @@ def show_case_a():
             consumption_l_per_100km = 0.0
             if use_fuel_adjustment:
                 ensure_a_diesel_price_loaded()
-                st.caption(
-                    f"Tankerkönig-Abrufbasis: {TANKERKOENIG_DEFAULT_LOCATION['label']} "
-                    f"({TANKERKOENIG_DEFAULT_LOCATION['lat']:.4f}, {TANKERKOENIG_DEFAULT_LOCATION['lng']:.4f}), "
-                    f"Radius {TANKERKOENIG_DEFAULT_RADIUS_KM:.0f} km."
-                )
-                st.caption("Der Dieselpreis wird automatisch geladen und etwa alle 15 Minuten aktualisiert.")
-                if st.session_state.get("a_fuel_fetch_result", {}).get("api_key_source") == "demo key":
-                    st.info(
-                        "Aktuell ist der Tankerkönig-Demo-Key aktiv. Die API liefert damit Testdaten, keine echten Marktpreise."
-                    )
-
                 fuel_fetch_error = st.session_state.get("a_fuel_fetch_error")
                 fuel_fetch_result = st.session_state.get("a_fuel_fetch_result")
                 fuel_button_label = (
-                    "✓ Tagespreis geladen" if fuel_fetch_result and not fuel_fetch_error else "Tagespreis laden"
+                    "Tagespreis aktualisieren" if fuel_fetch_result and not fuel_fetch_error else "Tagespreis laden"
                 )
 
                 f1, f2, f3 = st.columns([1, 1.15, 1], gap="medium")
@@ -1005,13 +990,18 @@ def show_case_a():
                         disabled=True,
                     )
                 with f2:
-                    diesel_current = st.number_input(
-                        "Diesel aktuell (EUR/L)",
-                        min_value=0.0,
-                        step=0.001,
-                        format="%.3f",
-                        key="a_diesel_current",
-                    )
+                    st.markdown("**Diesel aktuell (EUR/L)**")
+                    if fuel_fetch_result and not fuel_fetch_error:
+                        diesel_current = st.session_state["a_diesel_current"]
+                        st.metric("Geladener Tagespreis", f"{diesel_current:.3f}")
+                        st.caption(
+                            f"Abruf vom {fuel_fetch_result['fetched_at']} · "
+                            f"{fuel_fetch_result['station_count']} Stationen im Radius"
+                        )
+                    else:
+                        diesel_current = st.session_state["a_diesel_current"]
+                        st.info("Noch nicht geladen")
+                        st.caption("Bitte Tagespreis aktiv laden, um den Zuschlag auf Basis eines aktuellen Werts zu berechnen.")
                     if st.button(
                         fuel_button_label,
                         key="a_fetch_tankerkoenig",
@@ -1042,7 +1032,7 @@ def show_case_a():
                             else ""
                         )
                         + " | "
-                        f"Abruf: {fuel_fetch_result['fetched_at']} | Key: {fuel_fetch_result['api_key_source']}"
+                        f"Abruf: {fuel_fetch_result['fetched_at']}"
                     )
                 diesel_diff = max(0.0, diesel_current - diesel_base)
                 a1_extra_per_km = diesel_diff * (consumption_l_per_100km / 100.0)
@@ -1050,6 +1040,16 @@ def show_case_a():
                     f"Aufschlag A.1: {a1_extra_per_km:.3f} EUR/km "
                     f"(Differenz {diesel_diff:.2f} EUR/L)"
                 )
+                with st.expander("Technische Hinweise", expanded=False):
+                    st.caption(
+                        f"Abrufbasis: {TANKERKOENIG_DEFAULT_LOCATION['label']} "
+                        f"({TANKERKOENIG_DEFAULT_LOCATION['lat']:.4f}, {TANKERKOENIG_DEFAULT_LOCATION['lng']:.4f}), "
+                        f"Radius {TANKERKOENIG_DEFAULT_RADIUS_KM:.0f} km."
+                    )
+                    st.caption("Der Dieselpreis wird automatisch geladen und etwa alle 15 Minuten aktualisiert.")
+                    st.caption(f"ORS-Key-Quelle: {ors_api.source if api_key else 'nicht vorhanden'}")
+                    if fuel_fetch_result:
+                        st.caption(f"Tankerkönig-Key-Quelle: {fuel_fetch_result['api_key_source']}")
             else:
                 diesel_base = st.session_state["a_diesel_base"]
                 diesel_current = st.session_state["a_diesel_current"]
