@@ -1,0 +1,228 @@
+{
+  "meta": {
+    "name": "Paketversand Deutschland",
+    "currency": "EUR",
+    "version": "1.2",
+    "tariff_date": "2026-03-06"
+  },
+  "calculation_rules": {
+    "volumetric_divisor_cm3_per_kg": 5000.0,
+    "use_higher_of_real_and_volumetric_weight": true,
+    "no_additional_financing_fuel_toll_fees": true
+  },
+  "validation_rules": {
+    "allowed_destination_countries": ["DE"],
+    "max_weight_kg": 100.0
+  },
+  "carrier_validation_rules": {
+    "EXP": {
+      "max_weight_kg": 100.0,
+      "max_length_cm": 350.0,
+      "max_girth_plus_length_cm": 500.0
+    },
+    "LZ48": {
+      "max_weight_kg": 50.0,
+      "max_length_cm": 274.0,
+      "max_girth_plus_length_cm": 300.0
+    }
+  },
+  "extra_delivery_services": {
+    "address_clarification": {
+      "label": "Adressklärung",
+      "price_eur": 10.0,
+      "applies_per": "shipment",
+      "applies_to": ["EXP", "LZ48"]
+    },
+    "loading_waiting_15min": {
+      "label": "Lade-/Wartezeit (je angefangene 15 Min)",
+      "price_eur": 15.0,
+      "applies_per": "shipment",
+      "applies_to": ["EXP", "LZ48"]
+    },
+    "packaging_service_min": {
+      "label": "Verpackungsservice nach Aufwand (inkl. Material) mindestens",
+      "price_eur": 9.0,
+      "applies_per": "shipment",
+      "applies_to": ["EXP", "LZ48"]
+    }
+  },
+  "late_fees": {
+    "standard": {
+      "label": "Standardanmeldung (bis Cutoff)",
+      "price_eur": 0.0
+    },
+    "late_registration": {
+      "label": "Spätanmeldung",
+      "price_eur": 0.0
+    }
+  },
+  "late_pickup_rules": {
+    "applies_to": ["EXP", "LZ48"],
+    "registration_cutoff_hour_by_area": {
+      "A": 17,
+      "B": 16
+    },
+    "late_registration_fee_by_area_eur": {
+      "A": 25.0,
+      "B": 35.0
+    },
+    "time_window_fees": [
+      { "label": "17:00-18:00", "fee_area_a_eur": 0.0, "fee_area_b_eur": 35.0 },
+      { "label": "18:00-19:00", "fee_area_a_eur": 25.0, "fee_area_b_eur": 65.0 },
+      { "label": "19:00-20:00", "fee_area_a_eur": 45.0, "fee_area_b_eur": 85.0 },
+      { "label": "20:00-21:00", "fee_area_a_eur": 79.0, "fee_area_b_eur": 99.0 }
+    ],
+    "additional_shipment_fee_eur": 5.0,
+    "self_dropoff_after_19_discount_area_a_eur": 10.0
+  },
+  "pickup_area_rules": {
+    "A": {
+      "included": true,
+      "base_fee_eur": 0.0,
+      "postal_patterns": {
+        "prefix_x": ["570"],
+        "ranges": [[57223, 57258]],
+        "exact": [57290, 57555, 57572]
+      }
+    },
+    "B": {
+      "included": false,
+      "base_fee_eur": 15.0,
+      "postal_patterns": {
+        "prefix_x": ["574", "5164"],
+        "ranges": [[57548, 57567], [51580, 51598]],
+        "exact": [57271, 57299, 57339, 57368, 57399, 51674, 51702]
+      },
+      "waiver_threshold_shipments": {
+        "EXP": 2,
+        "LZ48": 3
+      }
+    },
+    "C": {
+      "included": false,
+      "base_fee_eur": 25.0,
+      "is_fallback_for_other_postal_codes": true,
+      "note": "Teilweise nur mit Zusatzservice/Tarifinfo vorab."
+    }
+  },
+  "oversized_shipment_surcharges": {
+    "length_over_cm": 9999.0,
+    "girth_plus_length_over_cm": 9999.0,
+    "weight_over_kg": 9999.0,
+    "surcharge_eur": 0.0,
+    "applies_per": "parcel"
+  },
+  "carrier_specific_surcharges": {
+    "LZ48": {
+      "over_25_to_50_kg_surcharge_eur_per_piece": 26.0,
+      "long_piece_threshold_length_cm": 120.0,
+      "long_piece_surcharge_eur_per_piece": 30.0
+    },
+    "EXP": {
+      "non_conveyable_over_50kg_surcharge_eur_per_piece": 24.0,
+      "non_conveyable_over_100kg_surcharge_eur_per_piece": 32.0,
+      "over_100kg_additional_eur_per_kg": 2.0,
+      "extra_services": {
+        "time_08": { "label": "8 Uhr", "price_eur": 45.0, "applies_per": "shipment", "quote_only": false },
+        "time_09": { "label": "9 Uhr", "price_eur": 30.0, "applies_per": "shipment", "quote_only": false },
+        "time_10": { "label": "10 Uhr", "price_eur": 20.0, "applies_per": "shipment", "quote_only": false },
+        "time_12": { "label": "12 Uhr", "price_eur": 10.0, "applies_per": "shipment", "quote_only": false },
+        "saturday_exp": { "label": "Samstagszustellung", "price_eur": 25.0, "applies_per": "shipment", "quote_only": false },
+        "sunday_holiday": { "label": "Sonntag/Feiertag", "price_eur": 0.0, "applies_per": "shipment", "quote_only": true },
+        "fixtermin": { "label": "Fixtermin (<31 Min)", "price_eur": 50.0, "applies_per": "shipment", "quote_only": false },
+        "special_time_window": { "label": "Spezielles Zeitfenster (<2h)", "price_eur": 30.0, "applies_per": "shipment", "quote_only": false },
+        "messezustellung": { "label": "Messezustellung", "price_eur": 25.0, "applies_per": "shipment", "quote_only": false },
+        "inselzustellung": { "label": "Inselzustellung", "price_eur": 0.0, "applies_per": "shipment", "quote_only": true },
+        "avis_tel": { "label": "Avis telef. / Abholung oder Zustellung", "price_eur": 10.0, "applies_per": "shipment", "quote_only": false }
+      },
+      "overlength_rules": [
+        {
+          "min_length_exclusive_cm": 280.0,
+          "max_length_inclusive_cm": 309.0,
+          "first_piece_surcharge_eur": 45.0,
+          "additional_piece_surcharge_eur": 15.0
+        },
+        {
+          "min_length_exclusive_cm": 309.0,
+          "max_length_inclusive_cm": 350.0,
+          "first_piece_surcharge_eur": 65.0,
+          "additional_piece_surcharge_eur": 25.0
+        }
+      ],
+      "overlength_over_350_quote_only": true,
+      "girth_rules": [
+        { "min_girth_exclusive_cm": 300.0, "max_girth_inclusive_cm": 400.0, "surcharge_eur_per_piece": 8.0 },
+        { "min_girth_exclusive_cm": 400.0, "max_girth_inclusive_cm": 500.0, "surcharge_eur_per_piece": 18.0 },
+        { "min_girth_exclusive_cm": 500.0, "max_girth_inclusive_cm": 9999.0, "surcharge_eur_per_piece": 49.0 }
+      ],
+      "girth_over_500_requires_approval": true
+    }
+  },
+  "insurance_logic": {
+    "included_value_eur": 250.0,
+    "rate_per_mille_of_declared_value": 1.5
+  },
+  "tariffs": {
+    "EXP": {
+      "carrier_label": "Der Kurier",
+      "service_label": "EXP überNacht",
+      "ground_rates_by_weight_band": [
+        { "max_weight_kg": 2.0, "price_eur": 39.0 },
+        { "max_weight_kg": 5.0, "price_eur": 44.0 },
+        { "max_weight_kg": 10.0, "price_eur": 49.0 },
+        { "max_weight_kg": 15.0, "price_eur": 54.0 },
+        { "max_weight_kg": 20.0, "price_eur": 59.0 },
+        { "max_weight_kg": 25.0, "price_eur": 64.0 },
+        { "max_weight_kg": 30.0, "price_eur": 72.0 },
+        { "max_weight_kg": 35.0, "price_eur": 84.0 },
+        { "max_weight_kg": 40.0, "price_eur": 92.0 },
+        { "max_weight_kg": 45.0, "price_eur": 102.0 },
+        { "max_weight_kg": 50.0, "price_eur": 114.0 },
+        { "max_weight_kg": 55.0, "price_eur": 136.0 },
+        { "max_weight_kg": 60.0, "price_eur": 142.0 },
+        { "max_weight_kg": 65.0, "price_eur": 149.0 },
+        { "max_weight_kg": 70.0, "price_eur": 156.0 },
+        { "max_weight_kg": 75.0, "price_eur": 164.0 },
+        { "max_weight_kg": 80.0, "price_eur": 179.0 },
+        { "max_weight_kg": 85.0, "price_eur": 188.0 },
+        { "max_weight_kg": 90.0, "price_eur": 196.0 },
+        { "max_weight_kg": 95.0, "price_eur": 208.0 },
+        { "max_weight_kg": 100.0, "price_eur": 226.0 }
+      ],
+      "service_surcharges": {
+        "fuel_surcharge_pct": 0.0
+      }
+    },
+    "LZ48": {
+      "carrier_label": "UPS",
+      "service_label": "LZ48 (1-2 Tage)",
+      "ground_rates_by_weight_band": [
+        { "max_weight_kg": 2.0, "price_eur": 24.9 },
+        { "max_weight_kg": 5.0, "price_eur": 27.2 },
+        { "max_weight_kg": 10.0, "price_eur": 29.8 },
+        { "max_weight_kg": 15.0, "price_eur": 33.3 },
+        { "max_weight_kg": 20.0, "price_eur": 36.9 },
+        { "max_weight_kg": 25.0, "price_eur": 41.6 },
+        { "max_weight_kg": 30.0, "price_eur": 45.8 },
+        { "max_weight_kg": 35.0, "price_eur": 50.9 },
+        { "max_weight_kg": 40.0, "price_eur": 57.2 },
+        { "max_weight_kg": 45.0, "price_eur": 63.4 },
+        { "max_weight_kg": 50.0, "price_eur": 69.6 },
+        { "max_weight_kg": 55.0, "price_eur": 76.8 },
+        { "max_weight_kg": 60.0, "price_eur": 84.9 },
+        { "max_weight_kg": 65.0, "price_eur": 93.2 },
+        { "max_weight_kg": 70.0, "price_eur": 99.5 },
+        { "max_weight_kg": 75.0, "price_eur": 105.6 },
+        { "max_weight_kg": 80.0, "price_eur": 119.2 },
+        { "max_weight_kg": 85.0, "price_eur": 131.1 },
+        { "max_weight_kg": 90.0, "price_eur": 139.4 },
+        { "max_weight_kg": 95.0, "price_eur": 147.2 },
+        { "max_weight_kg": 100.0, "price_eur": 157.3 }
+      ],
+      "service_surcharges": {
+        "fuel_surcharge_pct": 0.0
+      }
+    }
+  }
+}
+
