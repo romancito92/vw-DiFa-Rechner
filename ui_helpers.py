@@ -380,7 +380,7 @@ def render_case_c_plausibility_checks(
 def render_copy_price(label, value, key, show_offer_text=True):
     """Zeigt empfohlenen Preis inkl. Copy-Button."""
     copy_text = (
-        "Nochmals vielen Dank \u00fcr Ihre Anfrage.\n\n"
+        "Nochmals vielen Dank f\u00fcr Ihre Anfrage.\n\n"
         f"Gerne bieten wir Ihnen an: {format_eur_text(value)} netto.\n\n"
         "\u00dcber eine Beauftragung w\u00fcrden wir uns sehr freuen."
     )
@@ -396,7 +396,7 @@ def render_copy_price(label, value, key, show_offer_text=True):
     )
     if show_offer_text:
         st.caption(copy_text)
-        st.caption("Direkt nutzbar \u00fcr Mail, Bamboo und Angebot.")
+        st.caption("Direkt nutzbar f\u00fcr Mail, Bamboo und Angebot.")
 
 
 def render_recommendation_card(
@@ -414,7 +414,7 @@ def render_recommendation_card(
     formatted_text = format_eur_text(value)
     if copy_text is None:
         copy_text = (
-            "Nochmals vielen Dank \u00fcr Ihre Anfrage.\n\n"
+            "Nochmals vielen Dank f\u00fcr Ihre Anfrage.\n\n"
             f"Gerne bieten wir Ihnen an: {formatted_text} netto.\n\n"
             "\u00dcber eine Beauftragung w\u00fcrden wir uns sehr freuen."
         )
