@@ -50,6 +50,30 @@ def render_app_styles():
         }
 
         </style>
+        <script>
+        (() => {
+            const replaceEnterHint = () => {
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                const targets = [];
+                while (walker.nextNode()) {
+                    const node = walker.currentNode;
+                    if (node.nodeValue && node.nodeValue.includes("Press enter to apply")) {
+                        targets.push(node);
+                    }
+                }
+                targets.forEach((node) => {
+                    node.nodeValue = node.nodeValue.replaceAll(
+                        "Press enter to apply",
+                        "Mit Enter bestätigen"
+                    );
+                });
+            };
+
+            replaceEnterHint();
+            const observer = new MutationObserver(() => replaceEnterHint());
+            observer.observe(document.body, { childList: true, subtree: true });
+        })();
+        </script>
         """,
         unsafe_allow_html=True,
     )
