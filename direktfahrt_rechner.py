@@ -3,18 +3,29 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import streamlit as st
 
+from auth_helpers import (
+    get_oidc_configuration_error,
+    get_user_display_name,
+    get_user_email,
+    get_user_role,
+    is_logged_in,
+    is_user_authorized,
+    login_button_label,
+    render_access_denied,
+)
+
 from config import (
     RATE_TABLE,
-    DEFAULT_ORS_API_KEY,
-    ORS_API_KEY_SOURCE,
     ORS_PROFILE_LABELS,
     VEHICLE_TO_ORS_PROFILE,
     ORS_PROFILE_TO_VEHICLE,
-    DEFAULT_TANKERKOENIG_API_KEY,
-    TANKERKOENIG_API_KEY_SOURCE,
     TANKERKOENIG_DEFAULT_LOCATION,
     TANKERKOENIG_DEFAULT_RADIUS_KM,
+    get_auth_settings,
+    get_ors_api_key,
+    get_tankerkoenig_api_key,
 )
+from logging_helpers import configure_app_logger
 from ors_helpers import get_ors_address_suggestions, get_ors_distance_and_duration
 from tankerkoenig_helpers import get_nearby_diesel_price
 from ui_helpers import (
@@ -61,6 +72,44 @@ A_MAIN_SITE_ADDRESS = "Heeserstraße 5, 57072 Siegen"
 
 
 
+
+
+def render_login_gate():
+    """Blocks access until a valid internal user is logged in."""
+    auth_settings = get_auth_settings()
+
+    if not is_logged_in():
+        st.title("Versandwerk Preisrechner")
+        st.caption("Interne Anwendung fuer Preisfindung im Versand- und Transportkontext.")
+        st.info("Bitte mit Ihrem internen Versandwerk-Konto anmelden.")
+        oidc_configuration_error = get_oidc_configuration_error()
+        if oidc_configuration_error:
+            st.error(oidc_configuration_error)
+            st.caption("Ohne vollstaendige OIDC-Secrets bleibt die App aus Sicherheitsgruenden gesperrt.")
+            st.stop()
+
+        if st.button(login_button_label(), key="auth_login_button", type="primary"):
+            st.login(auth_settings.provider_key)
+        st.stop()
+
+    if not is_user_authorized():
+        render_access_denied()
+        st.stop()
+
+
+def render_user_session_bar():
+    """Shows the authenticated session and exposes logout."""
+    display_name = get_user_display_name()
+    email = get_user_email()
+    role = get_user_role()
+    role_label = "Admin" if role == "admin" else "User"
+
+    info_col, action_col = st.columns([0.8, 0.2], gap="medium", vertical_alignment="center")
+    with info_col:
+        st.caption(f"Angemeldet als {display_name} ({email}) | Rolle: {role_label}")
+    with action_col:
+        if st.button("Abmelden", key="auth_logout_button", width="stretch"):
+            st.logout()
 
 
 def render_app_header():
@@ -117,9 +166,10 @@ def mark_a_consumption_manual_override():
 def fetch_a_diesel_price_from_tankerkoenig():
     """Lädt einen Dieselpreis nahe dem Hauptstandort in Siegen."""
     fetched_at = datetime.now(APP_TIMEZONE)
+    tankerkoenig_api = get_tankerkoenig_api_key()
     try:
         result = get_nearby_diesel_price(
-            DEFAULT_TANKERKOENIG_API_KEY,
+            tankerkoenig_api.value,
             TANKERKOENIG_DEFAULT_LOCATION["lat"],
             TANKERKOENIG_DEFAULT_LOCATION["lng"],
             TANKERKOENIG_DEFAULT_RADIUS_KM,
@@ -131,7 +181,7 @@ def fetch_a_diesel_price_from_tankerkoenig():
 
     result["fetched_at"] = fetched_at.strftime("%d.%m.%Y %H:%M:%S")
     result["fetched_at_iso"] = fetched_at.isoformat()
-    result["api_key_source"] = TANKERKOENIG_API_KEY_SOURCE
+    result["api_key_source"] = tankerkoenig_api.source
     st.session_state["a_diesel_current"] = round(result["price"], 3)
     st.session_state["a_fuel_fetch_result"] = result
     st.session_state.pop("a_fuel_fetch_error", None)
@@ -791,7 +841,8 @@ def show_case_a():
             st.markdown("**Strecke und Fahrzeit**")
             with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
                 address_col, action_col = st.columns([1.45, 0.85], gap="large")
-                api_key = DEFAULT_ORS_API_KEY
+                ors_api = get_ors_api_key()
+                api_key = ors_api.value
                 profile = "driving-car"
                 if not api_key:
                     st.warning(
@@ -800,7 +851,7 @@ def show_case_a():
                     )
                 else:
                     st.caption(
-                        f"ORS API-Key geladen ({ORS_API_KEY_SOURCE}, Länge: {len(api_key)} Zeichen)."
+                        f"ORS API-Key geladen ({ors_api.source}, Länge: {len(api_key)} Zeichen)."
                     )
                 with address_col:
                     start_address = address_input_with_autofill(
@@ -919,7 +970,7 @@ def show_case_a():
                     f"Radius {TANKERKOENIG_DEFAULT_RADIUS_KM:.0f} km."
                 )
                 st.caption("Der Dieselpreis wird automatisch geladen und etwa alle 15 Minuten aktualisiert.")
-                if TANKERKOENIG_API_KEY_SOURCE == "demo key":
+                if st.session_state.get("a_fuel_fetch_result", {}).get("api_key_source") == "demo key":
                     st.info(
                         "Aktuell ist der Tankerkönig-Demo-Key aktiv. Die API liefert damit Testdaten, keine echten Marktpreise."
                     )
@@ -1170,7 +1221,8 @@ def show_case_b():
         st.markdown("### 1. Eingabe")
         with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
             ors_b_col1, ors_b_col2 = st.columns(2)
-            api_key_b = DEFAULT_ORS_API_KEY
+            ors_api_b = get_ors_api_key()
+            api_key_b = ors_api_b.value
             if not api_key_b:
                 st.warning(
                     "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` in `.streamlit/secrets.toml` "
@@ -1178,7 +1230,7 @@ def show_case_b():
                 )
             else:
                 st.caption(
-                    f"ORS API-Key geladen ({ORS_API_KEY_SOURCE}, L\u00e4nge: {len(api_key_b)} Zeichen)."
+                    f"ORS API-Key geladen ({ors_api_b.source}, L\u00e4nge: {len(api_key_b)} Zeichen)."
                 )
             _, ors_b_col4 = st.columns([1.2, 1])
             with ors_b_col4:
@@ -1474,8 +1526,11 @@ def show_case_b():
         )
 def main():
     st.set_page_config(page_title="Versandwerk Preisrechner [intern]", layout="wide")
+    configure_app_logger()
 
+    render_login_gate()
     render_app_header()
+    render_user_session_bar()
     cfg_caption = None
     meta_col1, meta_col2 = st.columns([1.15, 1], gap="large")
     with meta_col1:
