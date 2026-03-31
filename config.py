@@ -1,4 +1,5 @@
 import os
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,16 +83,38 @@ def _normalize_text(value):
 
 
 def _safe_get_secret(path, default=""):
+    candidate_maps = []
+
     try:
-        node = st.secrets
-        for key in path:
-            if hasattr(node, "get"):
-                node = node.get(key, default if key == path[-1] else {})
-            else:
-                return default
-        return node
+        if hasattr(st.secrets, "to_dict"):
+            candidate_maps.append(("st.secrets", st.secrets.to_dict()))
     except Exception:
-        return default
+        pass
+
+    for secrets_path in (
+        Path(__file__).with_name(".streamlit").joinpath("secrets.toml"),
+        Path.home().joinpath(".streamlit", "secrets.toml"),
+    ):
+        try:
+            if secrets_path.exists():
+                with secrets_path.open("rb") as fh:
+                    candidate_maps.append((str(secrets_path), tomllib.load(fh)))
+        except Exception:
+            continue
+
+    for _, secret_map in candidate_maps:
+        node = secret_map
+        found = True
+        for key in path:
+            if isinstance(node, dict) and key in node:
+                node = node[key]
+            else:
+                found = False
+                break
+        if found:
+            return node
+
+    return default
 
 
 def _read_from_sources(secret_paths, env_names, default="", allow_blank=False):
@@ -139,10 +162,13 @@ def get_ors_api_key():
         *_read_from_sources(
             secret_paths=(
                 ("ORS_API_KEY",),
+                ("ors_api_key",),
                 ("OPENROUTESERVICE_API_KEY",),
+                ("openrouteservice_api_key",),
                 ("openrouteservice", "api_key"),
+                ("openrouteservice", "apiKey"),
             ),
-            env_names=("ORS_API_KEY", "OPENROUTESERVICE_API_KEY"),
+            env_names=("ORS_API_KEY", "ors_api_key", "OPENROUTESERVICE_API_KEY"),
         )
     )
 
@@ -151,9 +177,11 @@ def get_tankerkoenig_api_key():
     value, source = _read_from_sources(
         secret_paths=(
             ("TANKERKOENIG_API_KEY",),
+            ("tankerkoenig_api_key",),
             ("tankerkoenig", "api_key"),
+            ("tankerkoenig", "apiKey"),
         ),
-        env_names=("TANKERKOENIG_API_KEY",),
+        env_names=("TANKERKOENIG_API_KEY", "tankerkoenig_api_key"),
         default=TANKERKOENIG_DEMO_API_KEY,
     )
     if source == "missing":
