@@ -83,6 +83,26 @@ def _normalize_text(value):
 
 
 def _safe_get_secret(path, default=""):
+    try:
+        node = st.secrets
+        for key in path:
+            next_node = None
+            if hasattr(node, "get"):
+                try:
+                    next_node = node.get(key)
+                except Exception:
+                    next_node = None
+            if next_node is None:
+                try:
+                    next_node = node[key]
+                except Exception:
+                    return default
+            node = next_node
+        if node is not None:
+            return node
+    except Exception:
+        pass
+
     candidate_maps = []
 
     try:
