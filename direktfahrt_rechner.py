@@ -61,7 +61,7 @@ from logic_parcel import (
 
 A_CONSUMPTION_PRESETS = {
     "Standard/manuell": 10.0,
-    "Fiat Ducato L4H3": 8.0,
+    "Fiat Ducato L4H3": 8.5,
     "Sprinter lang": 10.0,
     "Koffersprinter": 14.0,
 }
@@ -932,6 +932,10 @@ def show_case_a():
                 one_way_minutes = st.number_input(
                     "Fahrtdauer einfach (Minuten)", min_value=0, step=1, key="a_minutes"
                 )
+            if one_way_minutes > 240:
+                st.warning(
+                    "Achtung! Bitte Lenkzeiten von max. 4,5h bei Tourplanung berücksichtigen."
+                )
 
     with options_col:
         with st.container(border=True):
@@ -975,6 +979,12 @@ def show_case_a():
                         "Aktuell ist der Tankerkönig-Demo-Key aktiv. Die API liefert damit Testdaten, keine echten Marktpreise."
                     )
 
+                fuel_fetch_error = st.session_state.get("a_fuel_fetch_error")
+                fuel_fetch_result = st.session_state.get("a_fuel_fetch_result")
+                fuel_button_label = (
+                    "✓ Tagespreis geladen" if fuel_fetch_result and not fuel_fetch_error else "Tagespreis laden"
+                )
+
                 f1, f2, f3 = st.columns([1, 1.15, 1], gap="medium")
                 with f1:
                     diesel_base = st.number_input(
@@ -993,12 +1003,15 @@ def show_case_a():
                         format="%.3f",
                         key="a_diesel_current",
                     )
-                    st.button(
-                        "Tagespreis laden",
+                    if st.button(
+                        fuel_button_label,
                         key="a_fetch_tankerkoenig",
-                        on_click=fetch_a_diesel_price_from_tankerkoenig,
+                        type="primary" if not fuel_fetch_result else "secondary",
                         help="Lädt einen einfachen Durchschnitt der Dieselpreise nahe unserem Hauptstandort in Siegen.",
-                    )
+                    ):
+                        with st.spinner("Tagespreis wird geladen ..."):
+                            fetch_a_diesel_price_from_tankerkoenig()
+                        st.rerun()
                 with f3:
                     consumption_l_per_100km = st.number_input(
                         "Verbrauch (L/100 km)",
@@ -1007,8 +1020,6 @@ def show_case_a():
                         key="a_diesel_consumption",
                         on_change=mark_a_consumption_manual_override,
                     )
-                fuel_fetch_error = st.session_state.get("a_fuel_fetch_error")
-                fuel_fetch_result = st.session_state.get("a_fuel_fetch_result")
                 if fuel_fetch_error:
                     st.error(f"Tankerkönig-Abruf fehlgeschlagen: {fuel_fetch_error}")
                 elif fuel_fetch_result:
@@ -1149,6 +1160,7 @@ def show_case_a():
 
     with summary_col:
         with st.container(border=True):
+            st.success("Empfohlener Preis für das Angebot")
             st.markdown("**Aktive Auswahl**")
             st.caption(f"{selected_option} ({selected_sources[selected_option]})")
             render_copy_price(

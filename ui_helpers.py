@@ -1,3 +1,5 @@
+import html
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -304,13 +306,14 @@ def render_copy_price(label, value, key, show_offer_text=True):
     )
     js_price = formatted.replace("\\", "\\\\").replace('"', '\\"')
     js_offer = offer_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    title_offer = html.escape(offer_text, quote=True).replace("\n", "&#10;")
 
     st.markdown(f"**{label}: {formatted}**")
     components.html(
         f"""
         <div style="display:flex;gap:8px;align-items:center;">
             <button id="copy_btn_{key}" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;">Preis kopieren</button>
-            <button id="copy_text_btn_{key}" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;">Text kopieren</button>
+            <button id="copy_text_btn_{key}" title="{title_offer}" style="padding:8px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;">Text kopieren</button>
         </div>
         <script>
         const btn = document.getElementById("copy_btn_{key}");
