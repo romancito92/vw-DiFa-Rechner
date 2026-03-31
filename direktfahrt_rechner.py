@@ -41,6 +41,7 @@ from ui_helpers import (
     render_case_c_plausibility_checks,
     render_copy_price,
     render_icon_toggle,
+    render_recommendation_card,
 )
 from logic_direct import (
     get_distance_class,
@@ -1160,14 +1161,12 @@ def show_case_a():
 
     with summary_col:
         with st.container(border=True):
-            st.success("Empfohlener Preis für das Angebot")
-            st.markdown("**Aktive Auswahl**")
-            st.caption(f"{selected_option} ({selected_sources[selected_option]})")
-            render_copy_price(
-                "Empfohlener Preis",
+            render_recommendation_card(
+                "Empfohlener Preis für das Angebot",
                 selected_prices[selected_option],
+                selected_option,
+                selected_sources[selected_option],
                 f"a_{selected_key[selected_option]}",
-                show_offer_text=False,
             )
         with st.container(border=True):
             render_confidence_box(

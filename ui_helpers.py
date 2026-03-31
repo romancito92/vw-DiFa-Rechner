@@ -51,6 +51,83 @@ def render_app_styles():
             border-radius: 14px;
         }
 
+        .vw-reco-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(249,250,251,0.98) 100%);
+            border: 1px solid rgba(19, 31, 53, 0.08);
+            border-radius: 20px;
+            padding: 1rem 1rem 0.9rem 1rem;
+            box-shadow: 0 18px 38px rgba(19, 31, 53, 0.08);
+            margin-bottom: 0.65rem;
+        }
+
+        .vw-reco-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            background: rgba(232, 67, 40, 0.10);
+            color: #a9341e;
+            border: 1px solid rgba(232, 67, 40, 0.18);
+            border-radius: 999px;
+            padding: 0.28rem 0.7rem;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .vw-reco-kicker {
+            margin-top: 0.9rem;
+            color: #5f6b7a;
+            font-size: 0.82rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .vw-reco-price {
+            margin-top: 0.15rem;
+            color: #13213a;
+            font-size: clamp(2.2rem, 4vw, 3rem);
+            line-height: 1.05;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+        }
+
+        .vw-reco-subline {
+            margin-top: 0.35rem;
+            color: #6b7280;
+            font-size: 0.92rem;
+        }
+
+        .vw-reco-meta {
+            margin-top: 1rem;
+            padding: 0.85rem 0.95rem;
+            background: rgba(19, 31, 53, 0.04);
+            border: 1px solid rgba(19, 31, 53, 0.06);
+            border-radius: 14px;
+        }
+
+        .vw-reco-meta-label {
+            color: #6b7280;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .vw-reco-meta-value {
+            margin-top: 0.22rem;
+            color: #13213a;
+            font-size: 1rem;
+            font-weight: 700;
+        }
+
+        .vw-reco-meta-detail {
+            margin-top: 0.2rem;
+            color: #6b7280;
+            font-size: 0.88rem;
+            line-height: 1.35;
+        }
+
         </style>
         <script>
         (() => {
@@ -339,6 +416,68 @@ def render_copy_price(label, value, key, show_offer_text=True):
         st.caption("Direkt nutzbar für Mail, Bamboo und Angebot.")
     else:
         st.caption("Preis oder Angebotstext direkt kopierbar.")
+
+
+def render_recommendation_card(status_label, value, selection_label, selection_detail, key):
+    """Render a premium recommendation card with dominant price and copy actions."""
+    formatted = format_eur(value)
+    formatted_net = formatted.replace(" â‚¬", "")
+    offer_text = (
+        "Nochmals vielen Dank für Ihre Anfrage.\n\n"
+        f"Gerne bieten wir Ihnen an: {formatted_net} EUR netto.\n\n"
+        "Über eine Beauftragung würden wir uns sehr freuen."
+    )
+    js_price = formatted.replace("\\", "\\\\").replace('"', '\\"')
+    js_offer = offer_text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    title_offer = html.escape(offer_text, quote=True).replace("\n", "&#10;")
+    selection_label_html = html.escape(selection_label, quote=False)
+    selection_detail_html = html.escape(selection_detail, quote=False)
+    status_label_html = html.escape(status_label, quote=False)
+    formatted_html = html.escape(formatted, quote=False)
+
+    st.markdown(
+        f"""
+        <div class="vw-reco-card">
+            <div class="vw-reco-badge">{status_label_html}</div>
+            <div class="vw-reco-kicker">Aktuell empfohlen</div>
+            <div class="vw-reco-price">{formatted_html}</div>
+            <div class="vw-reco-subline">Direkt als Angebotspreis verwendbar</div>
+            <div class="vw-reco-meta">
+                <div class="vw-reco-meta-label">Basis</div>
+                <div class="vw-reco-meta-value">{selection_label_html}</div>
+                <div class="vw-reco-meta-detail">{selection_detail_html}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    components.html(
+        f"""
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:stretch;margin-top:2px;">
+            <button id="copy_btn_{key}" style="padding:10px 12px;border:1px solid rgba(19,31,53,0.12);border-radius:12px;background:#ffffff;cursor:pointer;font-weight:600;min-height:44px;">Preis kopieren</button>
+            <button id="copy_text_btn_{key}" title="{title_offer}" style="padding:10px 12px;border:1px solid rgba(19,31,53,0.12);border-radius:12px;background:#ffffff;cursor:pointer;font-weight:600;min-height:44px;">Text kopieren</button>
+        </div>
+        <div style="margin-top:8px;color:#6b7280;font-size:0.84rem;">Preis oder Angebotstext direkt kopierbar</div>
+        <script>
+        const btn = document.getElementById("copy_btn_{key}");
+        const textBtn = document.getElementById("copy_text_btn_{key}");
+        btn.addEventListener("click", async () => {{
+            await navigator.clipboard.writeText("{js_price}");
+            const oldText = btn.innerText;
+            btn.innerText = "Kopiert";
+            setTimeout(() => btn.innerText = oldText, 1200);
+        }});
+        textBtn.addEventListener("click", async () => {{
+            await navigator.clipboard.writeText("{js_offer}");
+            const oldText = textBtn.innerText;
+            textBtn.innerText = "Kopiert";
+            setTimeout(() => textBtn.innerText = oldText, 1200);
+        }});
+        </script>
+        """,
+        height=104,
+    )
 
 
 def render_icon_toggle(label, key, help_text, icon_path=None, icon_width=42):
