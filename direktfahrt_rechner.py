@@ -79,7 +79,7 @@ def render_login_gate():
     auth_settings = get_auth_settings()
 
     if not is_logged_in():
-        st.title("Versandwerk Preisrechner")
+        st.title("Versandwerk Preisrechner [intern]")
         st.caption("Interne Anwendung fuer Preisfindung im Versand- und Transportkontext.")
         st.info("Bitte mit Ihrem internen Versandwerk-Konto anmelden.")
         oidc_configuration_error = get_oidc_configuration_error()
