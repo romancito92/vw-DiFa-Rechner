@@ -39,7 +39,6 @@ from ui_helpers import (
     build_case_c_price_rows,
     build_case_c_price_bullets,
     render_case_c_plausibility_checks,
-    render_copy_price,
     render_icon_toggle,
     render_recommendation_card,
 )
@@ -796,12 +795,21 @@ def show_case_c():
                             alternative_result = exp
                     offer_text = build_case_c_offer_text(result, alternative_result)
                     if not (carrier_code == "LZ48" and lz48_not_offerable_vs_exp):
+                        render_recommendation_card(
+                            "Empfohlener Angebotspreis",
+                            result["total"],
+                            result["carrier_label"],
+                            f"{result.get('service_label', carrier_code)} ({carrier_code})",
+                            f"c_reco_{carrier_code.lower()}",
+                            copy_text=offer_text,
+                            subline="Direkt als Angebot für diesen Tarif verwendbar",
+                            action_hint="Preis oder Angebotstext direkt kopierbar",
+                        )
                         render_copy_text_button(
                             f"Angebotstext für {result['carrier_label']}",
                             offer_text,
                             f"c_offer_{carrier_code.lower()}",
                         )
-                        st.caption(offer_text)
 
         render_case_c_recommendation(exp, lz48)
 
@@ -1522,11 +1530,11 @@ def show_case_b():
         st.markdown("### 4. Empfehlung")
         b_selected_option = st.session_state["b_selected_option"]
         selected_price = b_options[b_selected_option]
-        st.success("Empfohlener Preis")
-        st.markdown(f"## {format_eur(selected_price)}")
-        render_copy_price(
-            "Empfohlener Preis",
+        render_recommendation_card(
+            "Empfohlener Preis für das Angebot",
             selected_price,
+            b_selected_option,
+            f"Distanzklasse {distance_class} · EK {format_eur(ek_price)}",
             f"b_{b_selected_option.replace(' ', '_').replace(',', '').replace('-', '_').lower()}",
         )
         st.markdown("**Kurze Herleitung**")
