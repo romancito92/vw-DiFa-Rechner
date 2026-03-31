@@ -143,7 +143,7 @@ def render_app_styles():
                 targets.forEach((node) => {
                     node.nodeValue = node.nodeValue.replaceAll(
                         "Press enter to apply",
-                        "Mit Enter bestätigen"
+                        "Mit Enter best?tigen"
                     );
                 });
             };
@@ -160,7 +160,7 @@ def render_app_styles():
 
 def format_eur(value):
     """Formatiert Zahlen als Euro mit 2 Nachkommastellen."""
-    return f"{value:,.2f} ?".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{value:,.2f} \u20ac".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def format_eur_text(value):
@@ -265,7 +265,7 @@ def render_case_c_recommendation(exp_result, lz48_result):
 
 
 def render_copy_text_button(label, text, key):
-    """Zeigt einen Copy-Button fuer beliebigen Text."""
+    """Zeigt einen Copy-Button \u00fcr beliebigen Text."""
     js_text = text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     components.html(
         f"""
@@ -288,17 +288,17 @@ def render_copy_text_button(label, text, key):
 
 
 def _build_case_c_product_label(result):
-    """Kundenfreundliche Produktbezeichnung fuer Modus C."""
+    """Kundenfreundliche Produktbezeichnung \u00fcr Modus C."""
     tariff_code = result.get("tariff_code", "")
     if tariff_code == "EXP":
-        return "EXP - ueberNacht"
+        return "EXP - \u00fcberNacht"
     if tariff_code == "LZ48":
         return "1-2 Tage Laufzeit - LZ48"
     return result.get("service_label", tariff_code)
 
 
 def build_case_c_offer_text(result, alternative_result=None):
-    """Erzeugt Angebots-Textbaustein fuer Modus C."""
+    """Erzeugt Angebots-Textbaustein \u00fcr Modus C."""
     price_net = format_eur_text(result["total"])
     main_product = _build_case_c_product_label(result)
     extra_labels = [name for name, amount in result["extras_breakdown"] if amount > 0]
@@ -310,7 +310,7 @@ def build_case_c_offer_text(result, alternative_result=None):
         extra_labels.append("Hoeherversicherung")
     service_suffix = f" ({'; '.join(extra_labels)})" if extra_labels else ""
     lines = [
-        "Nochmals vielen Dank fuer Ihre Anfrage.",
+        "Nochmals vielen Dank \u00fcr Ihre Anfrage.",
         "",
         f"Versandart: {main_product}{service_suffix}",
         f"Preis: {price_net} netto.",
@@ -319,8 +319,8 @@ def build_case_c_offer_text(result, alternative_result=None):
         alt_price_net = format_eur_text(alternative_result["total"])
         alt_product = _build_case_c_product_label(alternative_result)
         lines.append(f"Alternative: {alt_product}: {alt_price_net} netto.")
-    lines.extend(["", "Ueber eine Beauftragung wuerden wir uns sehr freuen."])
-    return "\\n".join(lines)
+    lines.extend(["", "\u00dcber eine Beauftragung w\u00fcrden wir uns sehr freuen."])
+    return "\n".join(lines)
 
 
 def build_case_c_price_rows(result):
@@ -345,9 +345,9 @@ def build_case_c_price_rows(result):
 
 
 def build_case_c_price_bullets(result):
-    """Baut kopierbare Bullet-Points fuer Preisbausteine."""
+    """Baut kopierbare Bullet-Points \u00fcr Preisbausteine."""
     rows = build_case_c_price_rows(result)
-    return "\\n".join(f"- {name}: {format_eur(amount)}" for name, amount in rows)
+    return "\n".join(f"- {name}: {format_eur(amount)}" for name, amount in rows)
 
 
 def render_case_c_plausibility_checks(
@@ -380,9 +380,9 @@ def render_case_c_plausibility_checks(
 def render_copy_price(label, value, key, show_offer_text=True):
     """Zeigt empfohlenen Preis inkl. Copy-Button."""
     copy_text = (
-        "Nochmals vielen Dank fuer Ihre Anfrage.\n\n"
+        "Nochmals vielen Dank \u00fcr Ihre Anfrage.\n\n"
         f"Gerne bieten wir Ihnen an: {format_eur_text(value)} netto.\n\n"
-        "Ueber eine Beauftragung wuerden wir uns sehr freuen."
+        "\u00dcber eine Beauftragung w\u00fcrden wir uns sehr freuen."
     )
     render_recommendation_card(
         status_label=label,
@@ -396,7 +396,7 @@ def render_copy_price(label, value, key, show_offer_text=True):
     )
     if show_offer_text:
         st.caption(copy_text)
-        st.caption("Direkt nutzbar fuer Mail, Bamboo und Angebot.")
+        st.caption("Direkt nutzbar \u00fcr Mail, Bamboo und Angebot.")
 
 
 def render_recommendation_card(
@@ -414,9 +414,9 @@ def render_recommendation_card(
     formatted_text = format_eur_text(value)
     if copy_text is None:
         copy_text = (
-            "Nochmals vielen Dank fuer Ihre Anfrage.\n\n"
+            "Nochmals vielen Dank \u00fcr Ihre Anfrage.\n\n"
             f"Gerne bieten wir Ihnen an: {formatted_text} netto.\n\n"
-            "Ueber eine Beauftragung wuerden wir uns sehr freuen."
+            "\u00dcber eine Beauftragung w\u00fcrden wir uns sehr freuen."
         )
 
     js_price = formatted.replace("\\", "\\\\").replace('"', '\\"')
