@@ -163,6 +163,13 @@ def mark_a_consumption_manual_override():
     st.session_state["a_consumption_manual_override"] = True
 
 
+def sync_a_vehicle_for_liftgate():
+    """Hebebühnenfahrten laufen standardmäßig auf Koffersprinter."""
+    if st.session_state.get("a_liftgate_required"):
+        st.session_state["a_consumption_preset"] = "Koffersprinter"
+        sync_a_consumption_from_preset()
+
+
 def fetch_a_diesel_price_from_tankerkoenig():
     """Lädt einen Dieselpreis nahe dem Hauptstandort in Siegen."""
     fetched_at = datetime.now(APP_TIMEZONE)
@@ -960,6 +967,7 @@ def show_case_a():
                     "a_liftgate_required",
                     "A.1: 39,00 EUR Basis und +0,15 EUR/km. A.2: +20 %. Nur, falls kundenseitig erwünscht/erforderlich.",
                     icon_path=str(liftgate_icon_path) if liftgate_icon_path.exists() else None,
+                    on_change=sync_a_vehicle_for_liftgate,
                 )
 
             use_fuel_adjustment = st.checkbox(

@@ -476,11 +476,11 @@ def render_recommendation_card(
     )
 
 
-def render_icon_toggle(label, key, help_text, icon_path=None, icon_width=42):
+def render_icon_toggle(label, key, help_text, icon_path=None, icon_width=42, on_change=None):
     """Render a compact inline icon-toggle-help group."""
     icon_col, toggle_col = st.columns([0.16, 0.84], gap="small", vertical_alignment="center")
     with icon_col:
         if icon_path:
             st.image(icon_path, width=icon_width)
     with toggle_col:
-        return st.toggle(label, key=key, help=help_text)
+        return st.toggle(label, key=key, help=help_text, on_change=on_change)
