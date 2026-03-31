@@ -28,6 +28,33 @@ def geocode_with_ors(address, api_key):
     return features[0]["geometry"]["coordinates"]
 
 
+def _join_non_empty(parts, separator=", "):
+    return separator.join(str(part).strip() for part in parts if str(part).strip())
+
+
+def _format_address_suggestion(props):
+    street = props.get("street") or props.get("name") or ""
+    house_number = props.get("housenumber") or ""
+    postal_code = props.get("postalcode") or ""
+    locality = (
+        props.get("locality")
+        or props.get("borough")
+        or props.get("municipality")
+        or props.get("county")
+        or ""
+    )
+    country = props.get("country") or ""
+    country_code = (props.get("country_a") or "").upper()
+
+    street_line = _join_non_empty([street, house_number], separator=" ")
+    city_line = _join_non_empty([postal_code, locality], separator=" ")
+
+    if country_code == "DE":
+        return _join_non_empty([street_line, city_line])
+
+    return _join_non_empty([street_line, city_line, country])
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_ors_address_suggestions(query, api_key):
     """Liefert bis zu 5 Adressvorschläge für Autocomplete."""
@@ -45,7 +72,7 @@ def get_ors_address_suggestions(query, api_key):
     suggestions = []
     for feature in features:
         props = feature.get("properties", {})
-        label = props.get("label")
+        label = _format_address_suggestion(props) or props.get("label")
         if label:
             suggestions.append(label)
     # Reihenfolge behalten, Duplikate entfernen
