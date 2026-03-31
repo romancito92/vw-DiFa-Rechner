@@ -1,5 +1,4 @@
 import os
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,54 +102,32 @@ def _safe_get_secret(path, default=""):
     except Exception:
         pass
 
-    candidate_maps = []
-
-    try:
-        if hasattr(st.secrets, "to_dict"):
-            candidate_maps.append(("st.secrets", st.secrets.to_dict()))
-    except Exception:
-        pass
-
-    for secrets_path in (
-        Path(__file__).with_name(".streamlit").joinpath("secrets.toml"),
-        Path.home().joinpath(".streamlit", "secrets.toml"),
-    ):
-        try:
-            if secrets_path.exists():
-                with secrets_path.open("rb") as fh:
-                    candidate_maps.append((str(secrets_path), tomllib.load(fh)))
-        except Exception:
-            continue
-
-    for _, secret_map in candidate_maps:
-        node = secret_map
-        found = True
-        for key in path:
-            if isinstance(node, dict) and key in node:
-                node = node[key]
-            else:
-                found = False
-                break
-        if found:
-            return node
-
     return default
 
 
-def _read_from_sources(secret_paths, env_names, default="", allow_blank=False):
-    for path in secret_paths:
-        raw = _safe_get_secret(path, "")
-        value = _normalize_text(raw)
-        if value or allow_blank:
-            if value:
-                return value, "st.secrets[" + ".".join(path) + "]"
+def get_secret(secret_name, section_paths=(), env_names=(), default=None):
+    """Read a secret with Streamlit Community Cloud-friendly precedence."""
+    root_value = _normalize_text(_safe_get_secret((secret_name,), ""))
+    if root_value:
+        return SecretValue(root_value, f"st.secrets[{secret_name}]")
+
+    for section_path in section_paths:
+        if not section_path:
+            continue
+        if isinstance(section_path, str):
+            path = tuple(part for part in section_path.split(".") if part)
+        else:
+            path = tuple(section_path)
+        value = _normalize_text(_safe_get_secret(path, ""))
+        if value:
+            return SecretValue(value, "st.secrets[" + ".".join(path) + "]")
 
     for env_name in env_names:
         value = _normalize_text(os.getenv(env_name, ""))
         if value:
-            return value, f"env[{env_name}]"
+            return SecretValue(value, f"env[{env_name}]")
 
-    return default, "missing"
+    return SecretValue("" if default is None else str(default), "missing")
 
 
 def _read_list(secret_paths, env_names, default=()):
@@ -178,35 +155,31 @@ def _read_list(secret_paths, env_names, default=()):
 
 
 def get_ors_api_key():
-    return SecretValue(
-        *_read_from_sources(
-            secret_paths=(
-                ("ORS_API_KEY",),
-                ("ors_api_key",),
-                ("OPENROUTESERVICE_API_KEY",),
-                ("openrouteservice_api_key",),
-                ("openrouteservice", "api_key"),
-                ("openrouteservice", "apiKey"),
-            ),
-            env_names=("ORS_API_KEY", "ors_api_key", "OPENROUTESERVICE_API_KEY"),
-        )
+    return get_secret(
+        "ORS_API_KEY",
+        section_paths=(
+            ("openrouteservice", "api_key"),
+            ("openrouteservice", "apiKey"),
+            ("api", "ORS_API_KEY"),
+        ),
+        env_names=("ORS_API_KEY", "OPENROUTESERVICE_API_KEY"),
     )
 
 
 def get_tankerkoenig_api_key():
-    value, source = _read_from_sources(
-        secret_paths=(
-            ("TANKERKOENIG_API_KEY",),
-            ("tankerkoenig_api_key",),
+    secret = get_secret(
+        "TANKERKOENIG_API_KEY",
+        section_paths=(
             ("tankerkoenig", "api_key"),
             ("tankerkoenig", "apiKey"),
+            ("api", "TANKERKOENIG_API_KEY"),
         ),
-        env_names=("TANKERKOENIG_API_KEY", "tankerkoenig_api_key"),
+        env_names=("TANKERKOENIG_API_KEY",),
         default=TANKERKOENIG_DEMO_API_KEY,
     )
-    if source == "missing":
-        source = "demo key"
-    return SecretValue(value=value, source=source)
+    if secret.source == "missing":
+        return SecretValue(value=TANKERKOENIG_DEMO_API_KEY, source="demo key")
+    return secret
 
 
 def get_auth_settings():
@@ -270,35 +243,28 @@ def get_oidc_settings():
         os.getenv("STREAMLIT_AUTH_COOKIE_SECRET", "")
     )
 
-    client_id, _ = _read_from_sources(
-        secret_paths=(
-            ("auth", provider_key, "client_id"),
-            ("auth", "client_id"),
-        ),
+    client_id = get_secret(
+        "client_id",
+        section_paths=(("auth", provider_key, "client_id"), ("auth", "client_id")),
         env_names=("STREAMLIT_AUTH_CLIENT_ID",),
-    )
-    client_secret, _ = _read_from_sources(
-        secret_paths=(
-            ("auth", provider_key, "client_secret"),
-            ("auth", "client_secret"),
-        ),
+    ).value
+    client_secret = get_secret(
+        "client_secret",
+        section_paths=(("auth", provider_key, "client_secret"), ("auth", "client_secret")),
         env_names=("STREAMLIT_AUTH_CLIENT_SECRET",),
-    )
-    tenant_id, _ = _read_from_sources(
-        secret_paths=(
-            ("auth", provider_key, "tenant_id"),
-            ("auth", "tenant_id"),
-        ),
+    ).value
+    tenant_id = get_secret(
+        "tenant_id",
+        section_paths=(("auth", provider_key, "tenant_id"), ("auth", "tenant_id")),
         env_names=("STREAMLIT_AUTH_TENANT_ID",),
-    )
-    server_metadata_url, _ = _read_from_sources(
-        secret_paths=(
-            ("auth", provider_key, "server_metadata_url"),
-            ("auth", "server_metadata_url"),
-        ),
+    ).value
+    server_metadata_secret = get_secret(
+        "server_metadata_url",
+        section_paths=(("auth", provider_key, "server_metadata_url"), ("auth", "server_metadata_url")),
         env_names=("STREAMLIT_AUTH_SERVER_METADATA_URL",),
         default=build_microsoft_metadata_url(tenant_id),
     )
+    server_metadata_url = server_metadata_secret.value
 
     missing_fields = []
     if not redirect_uri:

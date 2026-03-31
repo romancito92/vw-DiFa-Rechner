@@ -846,8 +846,8 @@ def show_case_a():
                 profile = "driving-car"
                 if not api_key:
                     st.warning(
-                        "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` in `.streamlit/secrets.toml` "
-                        "oder als Umgebungsvariable."
+                        "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` auf Root-Ebene in den "
+                        "Streamlit-Secrets oder alternativ als Umgebungsvariable."
                     )
                 else:
                     st.caption(
@@ -1225,8 +1225,8 @@ def show_case_b():
             api_key_b = ors_api_b.value
             if not api_key_b:
                 st.warning(
-                    "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` in `.streamlit/secrets.toml` "
-                    "oder als Umgebungsvariable."
+                    "ORS API-Key fehlt. Hinterlege `ORS_API_KEY` auf Root-Ebene in den "
+                    "Streamlit-Secrets oder alternativ als Umgebungsvariable."
                 )
             else:
                 st.caption(
