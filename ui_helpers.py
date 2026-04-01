@@ -60,6 +60,22 @@ def render_app_styles():
             margin-bottom: 0.65rem;
         }
 
+        .vw-reco-card--muted {
+            background: linear-gradient(180deg, rgba(251,252,252,0.98) 0%, rgba(247,248,249,0.98) 100%);
+            border-color: rgba(19, 31, 53, 0.06);
+            box-shadow: 0 10px 24px rgba(19, 31, 53, 0.05);
+        }
+
+        .vw-reco-card--muted .vw-reco-price,
+        .vw-reco-card--muted .vw-reco-meta-value {
+            color: #304258;
+        }
+
+        .vw-reco-card--muted .vw-reco-subline,
+        .vw-reco-card--muted .vw-reco-meta-detail {
+            color: #758193;
+        }
+
         .vw-reco-badge {
             display: inline-flex;
             align-items: center;
@@ -123,6 +139,59 @@ def render_app_styles():
 
         .vw-reco-meta-detail {
             margin-top: 0.2rem;
+            color: #6b7280;
+            font-size: 0.88rem;
+            line-height: 1.35;
+        }
+
+        .vw-casec-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.8rem;
+            margin-bottom: 0.7rem;
+        }
+
+        .vw-casec-head-main {
+            min-width: 0;
+        }
+
+        .vw-casec-carrier {
+            color: #13213a;
+            font-size: 1.18rem;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .vw-casec-service {
+            margin-top: 0.24rem;
+            color: #6b7280;
+            font-size: 0.92rem;
+            line-height: 1.35;
+        }
+
+        .vw-casec-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            white-space: nowrap;
+            background: rgba(29, 111, 95, 0.10);
+            color: #17584c;
+            border: 1px solid rgba(29, 111, 95, 0.18);
+            border-radius: 999px;
+            padding: 0.28rem 0.72rem;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .vw-casec-status--muted {
+            background: rgba(19, 31, 53, 0.05);
+            color: #4d5a6d;
+            border-color: rgba(19, 31, 53, 0.10);
+        }
+
+        .vw-casec-note {
+            margin: 0.15rem 0 0.85rem 0;
             color: #6b7280;
             font-size: 0.88rem;
             line-height: 1.35;
@@ -287,6 +356,29 @@ def render_copy_text_button(label, text, key):
     )
 
 
+def render_case_c_carrier_header(carrier_label, service_label, carrier_code, status_label, muted=False):
+    """Rendert einen kompakten Carrier-Kopf mit Status-Badge."""
+    carrier_html = html.escape(carrier_label, quote=False)
+    service_html = html.escape(
+        f"Tarif: {service_label} (intern: {carrier_code})",
+        quote=False,
+    )
+    status_html = html.escape(status_label, quote=False)
+    status_class = "vw-casec-status vw-casec-status--muted" if muted else "vw-casec-status"
+    st.markdown(
+        f"""
+        <div class="vw-casec-head">
+            <div class="vw-casec-head-main">
+                <div class="vw-casec-carrier">{carrier_html}</div>
+                <div class="vw-casec-service">{service_html}</div>
+            </div>
+            <div class="{status_class}">{status_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _build_case_c_product_label(result):
     """Kundenfreundliche Produktbezeichnung \u00fcr Modus C."""
     tariff_code = result.get("tariff_code", "")
@@ -408,6 +500,7 @@ def render_recommendation_card(
     copy_text=None,
     subline="Direkt als Angebotspreis verwendbar",
     action_hint="Preis oder Angebotstext direkt kopierbar",
+    muted=False,
 ):
     """Render a premium recommendation card with dominant price and copy actions."""
     formatted = format_eur(value)
@@ -428,10 +521,11 @@ def render_recommendation_card(
     formatted_html = html.escape(formatted, quote=False)
     subline_html = html.escape(subline, quote=False)
     action_hint_html = html.escape(action_hint, quote=False)
+    card_class = "vw-reco-card vw-reco-card--muted" if muted else "vw-reco-card"
 
     st.markdown(
         f"""
-        <div class="vw-reco-card">
+        <div class="{card_class}">
             <div class="vw-reco-badge">{status_label_html}</div>
             <div class="vw-reco-kicker">Aktuell empfohlen</div>
             <div class="vw-reco-price">{formatted_html}</div>

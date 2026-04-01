@@ -39,6 +39,7 @@ from ui_helpers import (
     build_case_c_price_rows,
     build_case_c_price_bullets,
     render_case_c_plausibility_checks,
+    render_case_c_carrier_header,
     render_icon_toggle,
     render_recommendation_card,
 )
@@ -728,63 +729,41 @@ def show_case_c():
         lz48_not_offerable_vs_exp = (
             exp is not None and lz48 is not None and lz48["total"] >= exp["total"]
         )
+        diff_pct = None
+        if exp is not None and lz48 is not None:
+            price_diff = abs(exp["total"] - lz48["total"])
+            price_ref = min(exp["total"], lz48["total"]) if min(exp["total"], lz48["total"]) > 0 else 1.0
+            diff_pct = (price_diff / price_ref) * 100
         t1, t2 = st.columns(2)
         for col, carrier_code, result, reasons in [
             (t1, "EXP", exp, exp_reasons),
             (t2, "LZ48", lz48, lz48_reasons),
         ]:
             with col:
-                st.markdown(f"**{cfg['tariffs'][carrier_code]['carrier_label']}**")
-                st.caption(
-                    f"Tarif: {cfg['tariffs'][carrier_code].get('service_label', carrier_code)} (intern: {carrier_code})"
-                )
+                carrier_label = cfg["tariffs"][carrier_code]["carrier_label"]
+                service_label = cfg["tariffs"][carrier_code].get("service_label", carrier_code)
 
                 if reasons:
+                    render_case_c_carrier_header(
+                        carrier_label,
+                        service_label,
+                        carrier_code,
+                        "Nicht möglich",
+                        muted=True,
+                    )
                     st.error("Nicht möglich für diese Sendung.")
                     for reason in reasons:
                         st.write(f"- {reason}")
                 elif result is None:
+                    render_case_c_carrier_header(
+                        carrier_label,
+                        service_label,
+                        carrier_code,
+                        "Nicht möglich",
+                        muted=True,
+                    )
                     st.error("Kein gültiges Gewichtsband für diese Sendung.")
                 else:
-                    st.success("Möglich")
-                    st.metric("Preis (netto)", format_eur(result["total"]))
-                    st.caption(f"Basispreis: {format_eur(result['base_total'])}")
-                    total_billable_weight = sum(
-                        metric["billable_weight"] for metric in result.get("piece_metrics", [])
-                    )
-                    st.caption(f"Berechnungsgewicht gesamt: {total_billable_weight:.1f} kg")
-                    for name, amount in result["extras_breakdown"]:
-                        st.caption(f"Extra Service - {name}: {format_eur(amount)}")
-                    if result["late_fee"] > 0:
-                        st.caption(
-                            f"Late Fee - {result['late_label']}: {format_eur(result['late_fee'])}"
-                        )
-                    if result["pickup_area_fee"] > 0:
-                        st.caption(
-                            f"Abholgebiet - {result['pickup_area_label']}: {format_eur(result['pickup_area_fee'])}"
-                        )
-                    if result["late_pickup_fee"] > 0:
-                        st.caption(
-                            f"Spätabholung - {result['late_pickup_label']}: {format_eur(result['late_pickup_fee'])}"
-                        )
-                    if result["oversize_fee"] > 0:
-                        st.caption(f"Oversize Surcharge: {format_eur(result['oversize_fee'])}")
-                    for label, amount in result["carrier_surcharge_breakdown"]:
-                        st.caption(f"Sonderzuschlag - {label}: {format_eur(amount)}")
-                    if result["insurance_fee"] > 0:
-                        st.caption(f"Höherversicherung: {format_eur(result['insurance_fee'])}")
-                    with st.expander("Änderungsprotokoll (Preisbausteine)", expanded=False):
-                        rows = build_case_c_price_rows(result)
-                        st.table([{"Baustein": name, "Betrag": format_eur(amount)} for name, amount in rows])
-                        render_copy_text_button(
-                            "Preisbausteine kopieren",
-                            build_case_c_price_bullets(result),
-                            f"c_price_blocks_{carrier_code.lower()}",
-                        )
-                    if carrier_code == "LZ48" and lz48_not_offerable_vs_exp:
-                        st.error(
-                            "Nicht aktiv anbieten: LZ48 ist in diesem Fall nicht günstiger als EXP."
-                        )
                     alternative_result = None
                     if carrier_code == "EXP":
                         if (
@@ -800,22 +779,51 @@ def show_case_c():
                             and exp["total"] < lz48["total"]
                         ):
                             alternative_result = exp
-                    offer_text = build_case_c_offer_text(result, alternative_result)
-                    if not (carrier_code == "LZ48" and lz48_not_offerable_vs_exp):
-                        render_recommendation_card(
-                            "Empfohlener Angebotspreis",
-                            result["total"],
-                            result["carrier_label"],
-                            f"{result.get('service_label', carrier_code)} ({carrier_code})",
-                            f"c_reco_{carrier_code.lower()}",
-                            copy_text=offer_text,
-                            subline="Direkt als Angebot für diesen Tarif verwendbar",
-                            action_hint="Preis oder Angebotstext direkt kopierbar",
+                    muted_product = False
+                    if carrier_code == "LZ48" and exp is not None and lz48 is not None:
+                        muted_product = lz48_not_offerable_vs_exp or (diff_pct is not None and diff_pct < 25)
+                    elif carrier_code == "EXP" and exp is not None and lz48 is None:
+                        muted_product = False
+
+                    status_label = "Möglich"
+                    if carrier_code == "LZ48" and lz48_not_offerable_vs_exp:
+                        status_label = "Möglich, aber nicht empfohlen"
+                    elif carrier_code == "LZ48" and diff_pct is not None and diff_pct < 25 and exp is not None:
+                        status_label = "Möglich als Alternative"
+
+                    render_case_c_carrier_header(
+                        carrier_label,
+                        service_label,
+                        carrier_code,
+                        status_label,
+                        muted=muted_product,
+                    )
+
+                    if carrier_code == "LZ48" and lz48_not_offerable_vs_exp:
+                        st.markdown(
+                            '<div class="vw-casec-note">In diesem Fall bitte EXP priorisieren. '
+                            "LZ48 ist nicht günstiger als das schnellere Produkt.</div>",
+                            unsafe_allow_html=True,
                         )
+                    offer_text = build_case_c_offer_text(result, alternative_result)
+                    render_recommendation_card(
+                        "Empfohlener Angebotspreis",
+                        result["total"],
+                        result["carrier_label"],
+                        f"{result.get('service_label', carrier_code)} ({carrier_code})",
+                        f"c_reco_{carrier_code.lower()}",
+                        copy_text=offer_text,
+                        subline="Direkt als Angebot für diesen Tarif verwendbar",
+                        action_hint="Preis oder Angebotstext direkt kopierbar",
+                        muted=muted_product,
+                    )
+                    with st.expander("Aufschlüsselung (Preisbausteine)", expanded=False):
+                        rows = build_case_c_price_rows(result)
+                        st.table([{"Baustein": name, "Betrag": format_eur(amount)} for name, amount in rows])
                         render_copy_text_button(
-                            f"Angebotstext für {result['carrier_label']}",
-                            offer_text,
-                            f"c_offer_{carrier_code.lower()}",
+                            "Preisbausteine kopieren",
+                            build_case_c_price_bullets(result),
+                            f"c_price_blocks_{carrier_code.lower()}",
                         )
 
         render_case_c_recommendation(exp, lz48)
