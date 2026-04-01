@@ -353,6 +353,8 @@ def show_case_c():
         st.session_state["c_piece_ids"] = [0]
     if "c_piece_next_id" not in st.session_state:
         st.session_state["c_piece_next_id"] = 1
+    if "c_form_version" not in st.session_state:
+        st.session_state["c_form_version"] = 0
 
     # Box 1: Sendungsdaten
     with st.container(border=True):
@@ -378,9 +380,11 @@ def show_case_c():
             st.metric("Anzahl Packstücke", len(st.session_state["c_piece_ids"]))
         with c4:
             if st.button("🔄 Neue Sendung", key="c_reset_shipment", width="stretch"):
+                next_form_version = int(st.session_state.get("c_form_version", 0)) + 1
                 for key in list(st.session_state.keys()):
                     if key.startswith("c_"):
                         del st.session_state[key]
+                st.session_state["c_form_version"] = next_form_version
                 st.rerun()
 
     declared_goods_value = 0.0
@@ -401,6 +405,7 @@ def show_case_c():
         st.markdown("### 2. Packstück-Daten")
         pieces = []
         piece_ids = list(st.session_state["c_piece_ids"])
+        form_version = int(st.session_state.get("c_form_version", 0))
         for idx, piece_id in enumerate(piece_ids, start=1):
             with st.expander(f"Packstück {idx}", expanded=(idx == 1)):
                 p1, p2, p3, p4, p5 = st.columns([1, 1, 1, 1, 0.8])
@@ -410,7 +415,7 @@ def show_case_c():
                         min_value=0.1,
                         value=5.0,
                         step=0.1,
-                        key=f"c_piece_{piece_id}_weight",
+                        key=f"c_v{form_version}_piece_{piece_id}_weight",
                     )
                 with p2:
                     p_length = st.number_input(
@@ -418,7 +423,7 @@ def show_case_c():
                         min_value=1.0,
                         value=40.0,
                         step=1.0,
-                        key=f"c_piece_{piece_id}_length",
+                        key=f"c_v{form_version}_piece_{piece_id}_length",
                     )
                 with p3:
                     p_width = st.number_input(
@@ -426,7 +431,7 @@ def show_case_c():
                         min_value=1.0,
                         value=30.0,
                         step=1.0,
-                        key=f"c_piece_{piece_id}_width",
+                        key=f"c_v{form_version}_piece_{piece_id}_width",
                     )
                 with p4:
                     p_height = st.number_input(
@@ -434,7 +439,7 @@ def show_case_c():
                         min_value=1.0,
                         value=20.0,
                         step=1.0,
-                        key=f"c_piece_{piece_id}_height",
+                        key=f"c_v{form_version}_piece_{piece_id}_height",
                     )
                 with p5:
                     st.caption("")
