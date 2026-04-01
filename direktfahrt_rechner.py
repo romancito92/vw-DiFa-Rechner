@@ -855,7 +855,7 @@ def show_case_a():
     with input_col:
         with st.container(border=True):
             st.markdown("**Strecke und Fahrzeit**")
-            with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
+            with st.expander("Entfernung automatisch berechnen (optional)", expanded=True):
                 address_col, action_col = st.columns([1.45, 0.85], gap="large")
                 ors_api = get_ors_api_key()
                 api_key = ors_api.value
@@ -1246,7 +1246,7 @@ def show_case_b():
         st.session_state["b_ors_feedback"] = None
     with st.container(border=True):
         st.markdown("### 1. Eingabe")
-        with st.expander("Entfernung automatisch berechnen (optional)", expanded=False):
+        with st.expander("Entfernung automatisch berechnen (optional)", expanded=True):
             ors_b_col1, ors_b_col2 = st.columns(2)
             ors_api_b = get_ors_api_key()
             api_key_b = ors_api_b.value
