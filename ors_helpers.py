@@ -1,6 +1,22 @@
-import streamlit as st
 import requests
-from config import ORS_GEOCODE_URL, ORS_DIRECTIONS_URL_TEMPLATE
+import streamlit as st
+
+from config import ORS_DIRECTIONS_URL_TEMPLATE, ORS_GEOCODE_URL
+
+
+ORS_GEOCODE_LANGUAGE = "de"
+
+GERMAN_CITY_TRANSLATIONS = {
+    "Cologne": "Köln",
+    "Munich": "München",
+    "Nuremberg": "Nürnberg",
+}
+
+COUNTRY_TRANSLATIONS = {
+    "Germany": "Deutschland",
+    "Austria": "Österreich",
+    "Switzerland": "Schweiz",
+}
 
 
 def _raise_ors_error(response):
@@ -12,11 +28,20 @@ def _raise_ors_error(response):
     raise ValueError(f"ORS HTTP {response.status_code}: {payload}")
 
 
+def _build_geocode_params(search_text, api_key, size):
+    return {
+        "api_key": api_key,
+        "text": search_text,
+        "size": size,
+        "lang": ORS_GEOCODE_LANGUAGE,
+    }
+
+
 def geocode_with_ors(address, api_key):
     """Liefert [lon, lat] für eine Adresse via ORS Geocoder."""
     response = requests.get(
         ORS_GEOCODE_URL,
-        params={"api_key": api_key, "text": address, "size": 1},
+        params=_build_geocode_params(address, api_key, 1),
         timeout=20,
     )
     if not response.ok:
@@ -32,10 +57,29 @@ def _join_non_empty(parts, separator=", "):
     return separator.join(str(part).strip() for part in parts if str(part).strip())
 
 
+def _translate_locality_name(locality, country_code):
+    cleaned_locality = (locality or "").strip()
+    if not cleaned_locality:
+        return ""
+    if country_code == "DE":
+        return GERMAN_CITY_TRANSLATIONS.get(cleaned_locality, cleaned_locality)
+    return cleaned_locality
+
+
+def _translate_country_name(country, country_code):
+    cleaned_country = (country or "").strip()
+    if not cleaned_country:
+        return ""
+    if country_code == "DE":
+        return "Deutschland"
+    return COUNTRY_TRANSLATIONS.get(cleaned_country, cleaned_country)
+
+
 def _format_address_suggestion(props):
     street = props.get("street") or props.get("name") or ""
     house_number = props.get("housenumber") or ""
     postal_code = props.get("postalcode") or ""
+    country_code = (props.get("country_a") or "").upper()
     locality = (
         props.get("locality")
         or props.get("borough")
@@ -43,8 +87,8 @@ def _format_address_suggestion(props):
         or props.get("county")
         or ""
     )
-    country = props.get("country") or ""
-    country_code = (props.get("country_a") or "").upper()
+    locality = _translate_locality_name(locality, country_code)
+    country = _translate_country_name(props.get("country"), country_code)
 
     street_line = _join_non_empty([street, house_number], separator=" ")
     city_line = _join_non_empty([postal_code, locality], separator=" ")
@@ -62,7 +106,7 @@ def get_ors_address_suggestions(query, api_key):
         return []
     response = requests.get(
         ORS_GEOCODE_URL,
-        params={"api_key": api_key, "text": query.strip(), "size": 5},
+        params=_build_geocode_params(query.strip(), api_key, 5),
         timeout=20,
     )
     if not response.ok:
@@ -75,7 +119,6 @@ def get_ors_address_suggestions(query, api_key):
         label = _format_address_suggestion(props) or props.get("label")
         if label:
             suggestions.append(label)
-    # Reihenfolge behalten, Duplikate entfernen
     seen = set()
     deduped = []
     for item in suggestions:
@@ -107,5 +150,3 @@ def get_ors_distance_and_duration(start_address, target_address, api_key, profil
     distance_km = summary["distance"] / 1000
     duration_minutes = summary["duration"] / 60
     return distance_km, duration_minutes
-
-
