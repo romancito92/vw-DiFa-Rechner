@@ -1,6 +1,10 @@
 import json
 from config import PARCEL_CONFIG_PATH
 
+UPS_LONGEST_SIDE_SURCHARGE_THRESHOLD_CM = 100.0
+UPS_SECOND_LONGEST_SIDE_SURCHARGE_THRESHOLD_CM = 76.0
+UPS_DIMENSION_SURCHARGE_EUR_PER_PIECE = 30.0
+
 def load_parcel_config():
     """Laedt externe Tarifkonfiguration für Modus C."""
     with PARCEL_CONFIG_PATH.open("r", encoding="utf-8") as fh:
@@ -15,9 +19,23 @@ def get_weight_price(weight_kg, tariff_rows):
     return None, None
 
 
+def get_piece_dimensions(piece):
+    """Sortiert PackstÃ¼ckmaÃŸe absteigend in lÃ¤ngste, zweitlÃ¤ngste und kÃ¼rzeste Seite."""
+    dims = sorted(
+        [
+            float(piece["length_cm"]),
+            float(piece["width_cm"]),
+            float(piece["height_cm"]),
+        ],
+        reverse=True,
+    )
+    return dims[0], dims[1], dims[2]
+
+
 def get_piece_metrics(cfg, piece):
     """Berechnet Real-/Volumen-/Abrechnungsgewicht und Gurtmaß je Packstück."""
     real_weight = float(piece["weight_kg"])
+    longest_side, second_longest_side, shortest_side = get_piece_dimensions(piece)
     volume_weight = (
         float(piece["length_cm"]) * float(piece["width_cm"]) * float(piece["height_cm"])
     ) / float(cfg["calculation_rules"]["volumetric_divisor_cm3_per_kg"])
@@ -25,13 +43,14 @@ def get_piece_metrics(cfg, piece):
         billable_weight = max(real_weight, volume_weight)
     else:
         billable_weight = real_weight
-    girth_plus_length = (
-        float(piece["length_cm"]) + 2 * float(piece["width_cm"]) + 2 * float(piece["height_cm"])
-    )
+    girth_plus_length = longest_side + 2 * second_longest_side + 2 * shortest_side
     return {
         "real_weight": real_weight,
         "volume_weight": volume_weight,
         "billable_weight": billable_weight,
+        "longest_side_cm": longest_side,
+        "second_longest_side_cm": second_longest_side,
+        "shortest_side_cm": shortest_side,
         "girth_plus_length": girth_plus_length,
     }
 
@@ -106,13 +125,18 @@ def evaluate_carrier_eligibility(cfg, tariff_code, pieces, selected_exp_services
     for idx, piece in enumerate(pieces, start=1):
         metrics = get_piece_metrics(cfg, piece)
         lu = metrics["girth_plus_length"]
+        longest_side = metrics["longest_side_cm"]
         if metrics["billable_weight"] > max_weight:
             reasons.append(
                 f"Packstück {idx}: Abrechnungsgewicht {metrics['billable_weight']:.1f} kg > {max_weight:.1f} kg"
             )
-        if piece["length_cm"] > max_length:
+        if False and longest_side > max_length:
             reasons.append(
                 f"Packstück {idx}: Länge {piece['length_cm']:.1f} cm > {max_length:.1f} cm"
+            )
+        if longest_side > max_length:
+            reasons.append(
+                f"Packstück {idx}: Längste Seite {longest_side:.1f} cm > {max_length:.1f} cm"
             )
         if lu > max_lu:
             reasons.append(
@@ -324,6 +348,17 @@ def calculate_case_c_tariff(
     carrier_surcharges = cfg.get("carrier_specific_surcharges", {}).get(tariff_code, {})
 
     if tariff_code == "LZ48":
+        oversized_dimension_count = sum(
+            1
+            for metrics in piece_metrics_list
+            if metrics["longest_side_cm"] > UPS_LONGEST_SIDE_SURCHARGE_THRESHOLD_CM
+            or metrics["second_longest_side_cm"] > UPS_SECOND_LONGEST_SIDE_SURCHARGE_THRESHOLD_CM
+        )
+        if oversized_dimension_count > 0:
+            amount = UPS_DIMENSION_SURCHARGE_EUR_PER_PIECE * oversized_dimension_count
+            carrier_surcharge_total += amount
+            carrier_surcharge_breakdown.append(("UPS Maßzuschlag >100/76 cm", amount))
+
         over_25_50 = float(
             carrier_surcharges.get("over_25_to_50_kg_surcharge_eur_per_piece", 0.0)
         )

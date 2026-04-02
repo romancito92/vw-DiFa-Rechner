@@ -202,6 +202,56 @@ def run_tests():
     assert ek_prices["EK x 1,4"] == 279
     assert ek_prices["EK x 1,5"] == 299
 
+    # 14) Packstück-Metrik sortiert Seiten korrekt und berechnet Gurtmaß aus der längsten Seite
+    piece_metrics = app.get_piece_metrics(cfg, piece(4, length=20, width=80, height=150))
+    assert round(piece_metrics["longest_side_cm"], 1) == 150.0
+    assert round(piece_metrics["second_longest_side_cm"], 1) == 80.0
+    assert round(piece_metrics["girth_plus_length"], 1) == 350.0
+
+    # 15) LZ48/UPS: längste Seite >274 oder Gurtmaß >300 schließen aus, auch wenn Länge-Feld selbst klein ist
+    lz48_longest_side_reasons = app.evaluate_carrier_eligibility(
+        cfg, "LZ48", [piece(4, length=40, width=275, height=20)], []
+    )
+    assert any("274.0 cm" in r for r in lz48_longest_side_reasons)
+
+    lz48_girth_reasons = app.evaluate_carrier_eligibility(
+        cfg, "LZ48", [piece(4, length=20, width=80, height=150)], []
+    )
+    assert any("> 300.0 cm" in r for r in lz48_girth_reasons)
+
+    # 16) LZ48/UPS: 30 EUR Zuschlag pro Packstück bei längster Seite >100 oder zweitlängster Seite >76
+    lz48_dim_surcharge_1 = app.calculate_case_c_tariff(
+        cfg,
+        "LZ48",
+        [piece(4, length=101, width=30, height=20)],
+        [],
+        "standard",
+        0.0,
+        [],
+        base_ctx(),
+        False,
+    )
+    assert any(
+        "100/76" in label and round(amount, 2) == 30.00
+        for label, amount in lz48_dim_surcharge_1["carrier_surcharge_breakdown"]
+    )
+
+    lz48_dim_surcharge_2 = app.calculate_case_c_tariff(
+        cfg,
+        "LZ48",
+        [piece(4, length=90, width=77, height=20)],
+        [],
+        "standard",
+        0.0,
+        [],
+        base_ctx(),
+        False,
+    )
+    assert any(
+        "100/76" in label and round(amount, 2) == 30.00
+        for label, amount in lz48_dim_surcharge_2["carrier_surcharge_breakdown"]
+    )
+
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 
 
