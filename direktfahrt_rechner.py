@@ -1419,9 +1419,7 @@ def show_case_b():
         if "b_selected_option" not in st.session_state:
             st.session_state["b_selected_option"] = "EK x 1,4"
         current_b_option = st.session_state["b_selected_option"]
-        if current_b_option not in b_options:
-            current_b_option = "EK x 1,4"
-            st.session_state["b_selected_option"] = current_b_option
+        current_ek_option = current_b_option if current_b_option in b_options else "EK x 1,4"
 
         method_left, method_right = st.columns(2, gap="large")
 
@@ -1437,7 +1435,7 @@ def show_case_b():
 
             b1_col1, b1_col2, b1_col3 = st.columns(3)
             with b1_col1:
-                b_ek13_active = current_b_option == "EK x 1,3"
+                b_ek13_active = current_ek_option == "EK x 1,3"
                 if st.button(
                     f"{'✓ ' if b_ek13_active else ''}{format_eur(b_options['EK x 1,3'])} ({format_eur_per_km(b_options['EK x 1,3'], km)})",
                     key="b_pick_ek_13",
@@ -1448,7 +1446,7 @@ def show_case_b():
                     st.rerun()
                 st.caption("EK x 1,3")
             with b1_col2:
-                b_ek14_active = current_b_option == "EK x 1,4"
+                b_ek14_active = current_ek_option == "EK x 1,4"
                 if st.button(
                     f"{'✓ ' if b_ek14_active else ''}{format_eur(b_options['EK x 1,4'])} ({format_eur_per_km(b_options['EK x 1,4'], km)})",
                     key="b_pick_ek_14",
@@ -1459,7 +1457,7 @@ def show_case_b():
                     st.rerun()
                 st.caption("EK x 1,4")
             with b1_col3:
-                b_ek15_active = current_b_option == "EK x 1,5"
+                b_ek15_active = current_ek_option == "EK x 1,5"
                 if st.button(
                     f"{'✓ ' if b_ek15_active else ''}{format_eur(b_options['EK x 1,5'])} ({format_eur_per_km(b_options['EK x 1,5'], km)})",
                     key="b_pick_ek_15",
