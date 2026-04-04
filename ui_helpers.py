@@ -393,16 +393,9 @@ def render_confidence_box(
                 ("Relative Spanne", f"{span_pct:.1f} %"),
             ]
         )
-        metric_html = "".join(
-            f"""
-            <div class="vw-compact-metric">
-                <div class="vw-compact-metric-label">{html.escape(label, quote=False)}</div>
-                <div class="vw-compact-metric-value">{html.escape(value, quote=False)}</div>
-            </div>
-            """
-            for label, value in metric_items
-        )
-        st.markdown(f'<div class="vw-compact-metrics">{metric_html}</div>', unsafe_allow_html=True)
+        metric_columns = st.columns(len(metric_items))
+        for column, (label, value) in zip(metric_columns, metric_items):
+            column.metric(label, value)
     else:
         if expected_re_margin is not None:
             c1, c2, c3, c4 = st.columns(4)
