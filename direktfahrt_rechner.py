@@ -1423,6 +1423,51 @@ def show_case_b():
 
         with method_left:
             render_method_card(
+                "Verkaufspreis aus realem Einkauf (EK)",
+                "Diese Vorschläge leiten sich direkt aus dem tatsächlich vorliegenden Einkaufspreis ab.",
+                tone="primary",
+            )
+
+            st.caption("Multiplikator-Logik auf den realen EK. Keine zusätzliche Steuerung nötig.")
+            st.caption("")
+
+            b1_col1, b1_col2, b1_col3 = st.columns(3)
+            with b1_col1:
+                b_ek13_active = current_b_option == "EK x 1,3"
+                if st.button(
+                    f"{'✓ ' if b_ek13_active else ''}{format_eur(b_options['EK x 1,3'])} ({format_eur_per_km(b_options['EK x 1,3'], km)})",
+                    key="b_pick_ek_13",
+                    width="stretch",
+                    type="primary" if b_ek13_active else "secondary",
+                ):
+                    st.session_state["b_selected_option"] = "EK x 1,3"
+                    st.rerun()
+                st.caption("EK x 1,3")
+            with b1_col2:
+                b_ek14_active = current_b_option == "EK x 1,4"
+                if st.button(
+                    f"{'✓ ' if b_ek14_active else ''}{format_eur(b_options['EK x 1,4'])} ({format_eur_per_km(b_options['EK x 1,4'], km)})",
+                    key="b_pick_ek_14",
+                    width="stretch",
+                    type="primary" if b_ek14_active else "secondary",
+                ):
+                    st.session_state["b_selected_option"] = "EK x 1,4"
+                    st.rerun()
+                st.caption("EK x 1,4")
+            with b1_col3:
+                b_ek15_active = current_b_option == "EK x 1,5"
+                if st.button(
+                    f"{'✓ ' if b_ek15_active else ''}{format_eur(b_options['EK x 1,5'])} ({format_eur_per_km(b_options['EK x 1,5'], km)})",
+                    key="b_pick_ek_15",
+                    width="stretch",
+                    type="primary" if b_ek15_active else "secondary",
+                ):
+                    st.session_state["b_selected_option"] = "EK x 1,5"
+                    st.rerun()
+                st.caption("EK x 1,5")
+
+        with method_right:
+            render_method_card(
                 "Vergleich mit Richtwerten und Erfahrungswerten",
                 "Diese Vorschläge basieren auf geschätzten EK-Richtwerten für eine ähnliche Fahrt.",
                 tone="secondary",
@@ -1467,7 +1512,7 @@ def show_case_b():
             st.session_state["b_selected_option"] = b2_vk_mid_label
         current_b_option = st.session_state["b_selected_option"]
 
-        with method_left:
+        with method_right:
             b2_col1, b2_col2, b2_col3 = st.columns(3)
             with b2_col1:
                 b_tab_min_active = current_b_option == b2_vk_min_label
@@ -1505,48 +1550,6 @@ def show_case_b():
                     st.rerun()
                 st.caption(f"Richtwert-Basis: {format_eur(table_ek_max)}")
                 st.caption(f"Richtwert Max x{str(b2_factor_max).replace('.', ',')}")
-
-        with method_right:
-            render_method_card(
-                "Verkaufspreis aus realem Einkauf (EK)",
-                "Diese Vorschläge leiten sich direkt aus dem tatsächlich vorliegenden Einkaufspreis ab.",
-                tone="primary",
-            )
-
-            b1_col1, b1_col2, b1_col3 = st.columns(3)
-            with b1_col1:
-                b_ek13_active = current_b_option == "EK x 1,3"
-                if st.button(
-                    f"{'✓ ' if b_ek13_active else ''}{format_eur(b_options['EK x 1,3'])} ({format_eur_per_km(b_options['EK x 1,3'], km)})",
-                    key="b_pick_ek_13",
-                    width="stretch",
-                    type="primary" if b_ek13_active else "secondary",
-                ):
-                    st.session_state["b_selected_option"] = "EK x 1,3"
-                    st.rerun()
-                st.caption("EK x 1,3")
-            with b1_col2:
-                b_ek14_active = current_b_option == "EK x 1,4"
-                if st.button(
-                    f"{'✓ ' if b_ek14_active else ''}{format_eur(b_options['EK x 1,4'])} ({format_eur_per_km(b_options['EK x 1,4'], km)})",
-                    key="b_pick_ek_14",
-                    width="stretch",
-                    type="primary" if b_ek14_active else "secondary",
-                ):
-                    st.session_state["b_selected_option"] = "EK x 1,4"
-                    st.rerun()
-                st.caption("EK x 1,4")
-            with b1_col3:
-                b_ek15_active = current_b_option == "EK x 1,5"
-                if st.button(
-                    f"{'✓ ' if b_ek15_active else ''}{format_eur(b_options['EK x 1,5'])} ({format_eur_per_km(b_options['EK x 1,5'], km)})",
-                    key="b_pick_ek_15",
-                    width="stretch",
-                    type="primary" if b_ek15_active else "secondary",
-                ):
-                    st.session_state["b_selected_option"] = "EK x 1,5"
-                    st.rerun()
-                st.caption("EK x 1,5")
 
         b_selected_option = st.session_state["b_selected_option"]
         selected_vk_price = b_options[b_selected_option]
