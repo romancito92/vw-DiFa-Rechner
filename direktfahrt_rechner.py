@@ -1418,6 +1418,10 @@ def show_case_b():
 
         if "b_selected_option" not in st.session_state:
             st.session_state["b_selected_option"] = "EK x 1,4"
+        current_b_option = st.session_state["b_selected_option"]
+        if current_b_option not in b_options:
+            current_b_option = "EK x 1,4"
+            st.session_state["b_selected_option"] = current_b_option
 
         method_left, method_right = st.columns(2, gap="large")
 
