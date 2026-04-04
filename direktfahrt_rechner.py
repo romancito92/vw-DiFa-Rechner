@@ -31,6 +31,7 @@ from tankerkoenig_helpers import get_nearby_diesel_price
 from ui_helpers import (
     format_eur,
     format_eur_per_km,
+    format_duration_compact,
     render_app_styles,
     render_confidence_box,
     render_case_c_recommendation,
@@ -41,6 +42,7 @@ from ui_helpers import (
     render_case_c_plausibility_checks,
     render_case_c_carrier_header,
     render_icon_toggle,
+    render_method_card,
     render_recommendation_card,
 )
 from logic_direct import (
@@ -1326,7 +1328,7 @@ def show_case_b():
                                     )
                                     st.session_state["b_ors_feedback"] = {
                                         "state": "success",
-                                        "values": f"{distance_km_b:.0f} km | {duration_minutes_b:.0f} Minuten",
+                                        "values": f"{distance_km_b:.0f} km | {format_duration_compact(duration_minutes_b)}",
                                     }
                                 except Exception as exc:
                                     st.session_state["b_ors_feedback"] = {
@@ -1348,7 +1350,7 @@ def show_case_b():
             km = st.number_input("Kilometer", min_value=0.0, step=1.0, key="b_km")
             if st.session_state.get("b_ors_duration_minutes") is not None:
                 st.caption(
-                    f"Info (ORS): {km:.1f} km | {st.session_state['b_ors_duration_minutes']} min"
+                    f"Info (ORS): {km:.1f} km | {format_duration_compact(st.session_state['b_ors_duration_minutes'])}"
                 )
         with col2:
             vehicle_type = st.selectbox(
@@ -1407,7 +1409,11 @@ def show_case_b():
 
     with st.container(border=True):
         st.markdown("### 3. VK-Vorschläge")
-        st.markdown("**Verkaufspreis aus Einkauf**")
+        render_method_card(
+            "Verkaufspreis aus realem Einkauf (EK)",
+            "Diese Vorschläge leiten sich direkt aus dem tatsächlich vorliegenden Einkaufspreis ab.",
+            tone="primary",
+        )
 
         b_options = {
             "EK x 1,3": ek_prices["EK x 1,3"],
@@ -1423,58 +1429,61 @@ def show_case_b():
         with b1_col1:
             b_ek13_active = current_b_option == "EK x 1,3"
             if st.button(
-                f"{'✓ ' if b_ek13_active else ''}EK x 1,3: {format_eur(b_options['EK x 1,3'])}",
+                f"{'✓ ' if b_ek13_active else ''}{format_eur(b_options['EK x 1,3'])} ({format_eur_per_km(b_options['EK x 1,3'], km)})",
                 key="b_pick_ek_13",
                 width="stretch",
                 type="primary" if b_ek13_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,3"
                 st.rerun()
-            st.caption(format_eur_per_km(b_options["EK x 1,3"], km))
+            st.caption("EK x 1,3")
         with b1_col2:
             b_ek14_active = current_b_option == "EK x 1,4"
             if st.button(
-                f"{'✓ ' if b_ek14_active else ''}EK x 1,4: {format_eur(b_options['EK x 1,4'])}",
+                f"{'✓ ' if b_ek14_active else ''}{format_eur(b_options['EK x 1,4'])} ({format_eur_per_km(b_options['EK x 1,4'], km)})",
                 key="b_pick_ek_14",
                 width="stretch",
                 type="primary" if b_ek14_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,4"
                 st.rerun()
-            st.caption(format_eur_per_km(b_options["EK x 1,4"], km))
+            st.caption("EK x 1,4")
         with b1_col3:
             b_ek15_active = current_b_option == "EK x 1,5"
             if st.button(
-                f"{'✓ ' if b_ek15_active else ''}EK x 1,5: {format_eur(b_options['EK x 1,5'])}",
+                f"{'✓ ' if b_ek15_active else ''}{format_eur(b_options['EK x 1,5'])} ({format_eur_per_km(b_options['EK x 1,5'], km)})",
                 key="b_pick_ek_15",
                 width="stretch",
                 type="primary" if b_ek15_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = "EK x 1,5"
                 st.rerun()
-            st.caption(format_eur_per_km(b_options["EK x 1,5"], km))
+            st.caption("EK x 1,5")
 
-        st.markdown("**Marktpreis-Vergleich**")
-        st.caption("Jeder Tabellen-EK-Wert kann separat mit x1,3 / x1,4 / x1,5 multipliziert werden.")
+        render_method_card(
+            "Vergleich mit Richtwerten und Erfahrungswerten",
+            "Diese Vorschläge basieren auf geschätzten EK-Richtwerten für eine ähnliche Fahrt, nicht auf dem realen Einkauf.",
+            tone="secondary",
+        )
 
         f1, f2, f3 = st.columns(3)
         with f1:
             b2_factor_min = st.selectbox(
-                "Faktor für Tabellen-Min",
+                "Faktor für Richtwert Min",
                 [1.3, 1.4, 1.5],
                 index=0,
                 key="b2_factor_min",
             )
         with f2:
             b2_factor_mid = st.selectbox(
-                "Faktor für Tabellen-Mittel",
+                "Faktor für Richtwert Mitte",
                 [1.3, 1.4, 1.5],
                 index=1,
                 key="b2_factor_mid",
             )
         with f3:
             b2_factor_max = st.selectbox(
-                "Faktor für Tabellen-Max",
+                "Faktor für Richtwert Max",
                 [1.3, 1.4, 1.5],
                 index=2,
                 key="b2_factor_max",
@@ -1500,42 +1509,39 @@ def show_case_b():
         with b2_col1:
             b_tab_min_active = current_b_option == b2_vk_min_label
             if st.button(
-                f"{'✓ ' if b_tab_min_active else ''}{b2_vk_min_label}: {format_eur(b2_vk_min)}",
+                f"{'✓ ' if b_tab_min_active else ''}{format_eur(b2_vk_min)} ({format_eur_per_km(b2_vk_min, km)})",
                 key="b_pick_tab_min",
                 width="stretch",
                 type="primary" if b_tab_min_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_min_label
                 st.rerun()
-            st.caption(
-                f"Basis EK {format_eur(table_ek_min)} · {format_eur_per_km(b2_vk_min, km)}"
-            )
+            st.caption(f"Richtwert-Basis: {format_eur(table_ek_min)}")
+            st.caption(f"Herleitung: Richtwert Min x{str(b2_factor_min).replace('.', ',')}")
         with b2_col2:
             b_tab_mid_active = current_b_option == b2_vk_mid_label
             if st.button(
-                f"{'✓ ' if b_tab_mid_active else ''}{b2_vk_mid_label}: {format_eur(b2_vk_mid)}",
+                f"{'✓ ' if b_tab_mid_active else ''}{format_eur(b2_vk_mid)} ({format_eur_per_km(b2_vk_mid, km)})",
                 key="b_pick_tab_mid",
                 width="stretch",
                 type="primary" if b_tab_mid_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_mid_label
                 st.rerun()
-            st.caption(
-                f"Basis EK {format_eur(table_ek_mid)} · {format_eur_per_km(b2_vk_mid, km)}"
-            )
+            st.caption(f"Richtwert-Basis: {format_eur(table_ek_mid)}")
+            st.caption(f"Herleitung: Richtwert Mitte x{str(b2_factor_mid).replace('.', ',')}")
         with b2_col3:
             b_tab_max_active = current_b_option == b2_vk_max_label
             if st.button(
-                f"{'✓ ' if b_tab_max_active else ''}{b2_vk_max_label}: {format_eur(b2_vk_max)}",
+                f"{'✓ ' if b_tab_max_active else ''}{format_eur(b2_vk_max)} ({format_eur_per_km(b2_vk_max, km)})",
                 key="b_pick_tab_max",
                 width="stretch",
                 type="primary" if b_tab_max_active else "secondary",
             ):
                 st.session_state["b_selected_option"] = b2_vk_max_label
                 st.rerun()
-            st.caption(
-                f"Basis EK {format_eur(table_ek_max)} · {format_eur_per_km(b2_vk_max, km)}"
-            )
+            st.caption(f"Richtwert-Basis: {format_eur(table_ek_max)}")
+            st.caption(f"Herleitung: Richtwert Max x{str(b2_factor_max).replace('.', ',')}")
 
         b_selected_option = st.session_state["b_selected_option"]
         expected_re_margin = b_options[b_selected_option] - ek_price
@@ -1545,6 +1551,8 @@ def show_case_b():
             max(b_options.values()),
             "B-Modell (alle Vorschläge)",
             expected_re_margin=expected_re_margin,
+            compact=True,
+            soft_warning=True,
         )
 
     with st.container(border=True):

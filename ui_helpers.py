@@ -197,6 +197,81 @@ def render_app_styles():
             line-height: 1.35;
         }
 
+        .vw-method-card {
+            margin: 0.25rem 0 0.9rem 0;
+            padding: 0.9rem 1rem 0.9rem 1rem;
+            border-left: 5px solid #1d6f5f;
+            background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,251,0.98) 100%);
+            border-radius: 16px;
+            box-shadow: 0 10px 24px rgba(19, 31, 53, 0.05);
+            border-top: 1px solid rgba(19, 31, 53, 0.06);
+            border-right: 1px solid rgba(19, 31, 53, 0.06);
+            border-bottom: 1px solid rgba(19, 31, 53, 0.06);
+        }
+
+        .vw-method-card--secondary {
+            border-left-color: #426b8a;
+            background: linear-gradient(180deg, rgba(252,253,255,0.98) 0%, rgba(247,249,252,0.98) 100%);
+        }
+
+        .vw-method-kicker {
+            color: #5f6b7a;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .vw-method-title {
+            margin-top: 0.18rem;
+            color: #13213a;
+            font-size: 1.06rem;
+            font-weight: 700;
+        }
+
+        .vw-method-subline {
+            margin-top: 0.18rem;
+            color: #6b7280;
+            font-size: 0.9rem;
+            line-height: 1.35;
+        }
+
+        .vw-compact-metrics {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.7rem;
+            margin-top: 0.35rem;
+            margin-bottom: 0.8rem;
+        }
+
+        .vw-compact-metric {
+            background: rgba(248, 250, 251, 0.96);
+            border: 1px solid rgba(19, 31, 53, 0.08);
+            border-radius: 14px;
+            padding: 0.7rem 0.8rem;
+        }
+
+        .vw-compact-metric-label {
+            color: #6b7280;
+            font-size: 0.78rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .vw-compact-metric-value {
+            margin-top: 0.18rem;
+            color: #13213a;
+            font-size: 1.05rem;
+            font-weight: 700;
+            line-height: 1.15;
+        }
+
+        @media (max-width: 980px) {
+            .vw-compact-metrics {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
         </style>
         <script>
         (() => {
@@ -245,7 +320,45 @@ def format_eur_per_km(value, km):
     return f"{per_km:,.2f} EUR/km".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def render_confidence_box(min_price, max_price, caption, expected_re_margin=None):
+def format_duration_compact(total_minutes):
+    """Formatiert Minuten als kompakte Stunden-/Minuten-Anzeige."""
+    if total_minutes is None:
+        return "-"
+    minutes = int(round(float(total_minutes)))
+    hours, remainder = divmod(minutes, 60)
+    if hours <= 0:
+        return f"{remainder}m"
+    if remainder == 0:
+        return f"{hours}h"
+    return f"{hours}h {remainder}m"
+
+
+def render_method_card(title, subline, tone="primary", kicker="Berechnungsmethode"):
+    """Rendert eine kompakte Methodenkachel mit linker Leitfarbe."""
+    card_class = "vw-method-card vw-method-card--secondary" if tone == "secondary" else "vw-method-card"
+    title_html = html.escape(title, quote=False)
+    subline_html = html.escape(subline, quote=False)
+    kicker_html = html.escape(kicker, quote=False)
+    st.markdown(
+        f"""
+        <div class="{card_class}">
+            <div class="vw-method-kicker">{kicker_html}</div>
+            <div class="vw-method-title">{title_html}</div>
+            <div class="vw-method-subline">{subline_html}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_confidence_box(
+    min_price,
+    max_price,
+    caption,
+    expected_re_margin=None,
+    compact=False,
+    soft_warning=False,
+):
     """Zeigt Preiskonfidenz auf Basis der Spanne."""
     span = max_price - min_price
     mid = (min_price + max_price) / 2 if (min_price + max_price) > 0 else 0
@@ -262,27 +375,49 @@ def render_confidence_box(min_price, max_price, caption, expected_re_margin=None
     elif span_pct < 50:
         level = "Niedrig"
         tone = "warning"
-        hint = "Groessere Streuung. Bitte kurz abstimmen."
+        hint = "Größere Streuung. Bitte kurz abstimmen."
     else:
         level = "Niedrig"
         tone = "error"
-        hint = "Achtung - Preis bitte genau pruefen."
+        hint = "Achtung - Preis bitte genau prüfen."
 
     st.markdown("**Preiskonfidenz**")
-    if expected_re_margin is not None:
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Erwartete RE-Marge", format_eur(expected_re_margin))
-        c2.metric("Konfidenz", level)
-        c3.metric("Spanne", format_eur(span))
-        c4.metric("Relative Spanne", f"{span_pct:.1f} %")
+    if compact:
+        metric_items = []
+        if expected_re_margin is not None:
+            metric_items.append(("Erwartete RE-Marge", format_eur(expected_re_margin)))
+        metric_items.extend(
+            [
+                ("Konfidenz", level),
+                ("Spanne", format_eur(span)),
+                ("Relative Spanne", f"{span_pct:.1f} %"),
+            ]
+        )
+        metric_html = "".join(
+            f"""
+            <div class="vw-compact-metric">
+                <div class="vw-compact-metric-label">{html.escape(label, quote=False)}</div>
+                <div class="vw-compact-metric-value">{html.escape(value, quote=False)}</div>
+            </div>
+            """
+            for label, value in metric_items
+        )
+        st.markdown(f'<div class="vw-compact-metrics">{metric_html}</div>', unsafe_allow_html=True)
     else:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Konfidenz", level)
-        c2.metric("Spanne", format_eur(span))
-        c3.metric("Relative Spanne", f"{span_pct:.1f} %")
+        if expected_re_margin is not None:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Erwartete RE-Marge", format_eur(expected_re_margin))
+            c2.metric("Konfidenz", level)
+            c3.metric("Spanne", format_eur(span))
+            c4.metric("Relative Spanne", f"{span_pct:.1f} %")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Konfidenz", level)
+            c2.metric("Spanne", format_eur(span))
+            c3.metric("Relative Spanne", f"{span_pct:.1f} %")
     if tone == "success":
         st.success(f"{caption}: {hint}")
-    elif tone == "warning":
+    elif tone == "warning" or (tone == "error" and soft_warning):
         st.warning(f"{caption}: {hint}")
     else:
         st.error(f"{caption}: {hint}")
