@@ -1549,7 +1549,14 @@ def show_case_b():
                 st.caption("EK x 1,5")
 
         b_selected_option = st.session_state["b_selected_option"]
-        expected_re_margin = b_options[b_selected_option] - ek_price
+        selected_vk_price = b_options[b_selected_option]
+        expected_re_margin = selected_vk_price - ek_price
+        expected_re_margin_pct = (
+            (expected_re_margin / selected_vk_price) * 100 if selected_vk_price > 0 else 0.0
+        )
+        margin_label = (
+            f"{format_eur(expected_re_margin)} ({expected_re_margin_pct:.1f} %)"
+        )
         st.caption(f"Aktive Auswahl: {b_selected_option}")
         render_confidence_box(
             min(b_options.values()),
@@ -1558,7 +1565,20 @@ def show_case_b():
             expected_re_margin=expected_re_margin,
             compact=True,
             soft_warning=True,
+            expected_re_margin_label=margin_label,
+            show_hint=False,
         )
+
+        if expected_re_margin < 0:
+            st.error(
+                "Diese Auswahl würde voraussichtlich einen Verlust verursachen. "
+                "So bitte nicht anbieten."
+            )
+        elif expected_re_margin < 49.0:
+            st.warning(
+                "Achtung: Die erwartete RE-Marge dieser Auswahl ist niedrig. "
+                "Preis bitte vor Angebotsfreigabe prüfen."
+            )
 
     with st.container(border=True):
         st.markdown("### 4. Empfehlung")

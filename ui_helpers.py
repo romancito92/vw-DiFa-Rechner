@@ -358,6 +358,8 @@ def render_confidence_box(
     expected_re_margin=None,
     compact=False,
     soft_warning=False,
+    expected_re_margin_label=None,
+    show_hint=True,
 ):
     """Zeigt Preiskonfidenz auf Basis der Spanne."""
     span = max_price - min_price
@@ -385,7 +387,8 @@ def render_confidence_box(
     if compact:
         metric_items = []
         if expected_re_margin is not None:
-            metric_items.append(("Erwartete RE-Marge", format_eur(expected_re_margin)))
+            margin_value = expected_re_margin_label or format_eur(expected_re_margin)
+            metric_items.append(("Erwartete RE-Marge", margin_value))
         metric_items.extend(
             [
                 ("Konfidenz", level),
@@ -395,11 +398,12 @@ def render_confidence_box(
         )
         metric_columns = st.columns(len(metric_items))
         for column, (label, value) in zip(metric_columns, metric_items):
-            column.metric(label, value)
+            column.caption(label)
+            column.markdown(f"**{value}**")
     else:
         if expected_re_margin is not None:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Erwartete RE-Marge", format_eur(expected_re_margin))
+            c1.metric("Erwartete RE-Marge", expected_re_margin_label or format_eur(expected_re_margin))
             c2.metric("Konfidenz", level)
             c3.metric("Spanne", format_eur(span))
             c4.metric("Relative Spanne", f"{span_pct:.1f} %")
@@ -408,12 +412,13 @@ def render_confidence_box(
             c1.metric("Konfidenz", level)
             c2.metric("Spanne", format_eur(span))
             c3.metric("Relative Spanne", f"{span_pct:.1f} %")
-    if tone == "success":
-        st.success(f"{caption}: {hint}")
-    elif tone == "warning" or (tone == "error" and soft_warning):
-        st.warning(f"{caption}: {hint}")
-    else:
-        st.error(f"{caption}: {hint}")
+    if show_hint:
+        if tone == "success":
+            st.success(f"{caption}: {hint}")
+        elif tone == "warning" or (tone == "error" and soft_warning):
+            st.warning(f"{caption}: {hint}")
+        else:
+            st.error(f"{caption}: {hint}")
 
 
 def render_case_c_recommendation(exp_result, lz48_result):
