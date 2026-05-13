@@ -237,6 +237,16 @@ def determine_case_d_base_markup(weight_class, length_class):
     return 80.0, "Leicht / kompakt"
 
 
+def get_case_d_ek_notice(ek_net):
+    """Gibt den operativen EK-Hinweis fuer Modus D zurueck."""
+    ek_value = float(ek_net)
+    if ek_value == 0.0:
+        return "missing_ek"
+    if ek_value > 500.0:
+        return "high_ek"
+    return None
+
+
 def calculate_case_d_ek_plus(ek_net, product_type, weight_class, length_class, adjustment_label):
     """Berechnet den pragmatischen EK+-Richtwert fuer Modus D."""
     product_surcharges = {
@@ -1723,6 +1733,7 @@ def show_case_d():
     )
     adjustment_pct = int(round((result["adjustment_factor"] - 1.0) * 100))
     adjustment_detail = "ohne Anpassung" if adjustment_pct == 0 else f"{adjustment_pct:+d} % auf den Aufschlag"
+    ek_notice = get_case_d_ek_notice(ek_net)
     copy_text = (
         "Nochmals vielen Dank für Ihre Anfrage.\n\n"
         f"Gerne bieten wir Ihnen die Sendung für {format_eur(result['rounded_vk'])} netto an.\n\n"
@@ -1731,33 +1742,41 @@ def show_case_d():
 
     with result_col:
         st.markdown("### 2. Ergebnis")
-        with st.container(border=True):
-            render_recommendation_card(
-                "Empfohlener Preis für das Angebot",
-                result["rounded_vk"],
-                "EK+ Richtwert",
-                f"{result['product_type']} · {result['rule_tier']}",
-                "d_ek_plus",
-                copy_text=copy_text,
-                subline="Direkt als Angebotspreis verwendbar",
-                action_hint="Preis oder kurzen Angebotstext direkt kopierbar",
-            )
+        if ek_notice == "missing_ek":
+            st.warning("Bitte tragen Sie den Netto-EK ein, um einen Vorschlag berechnen zu können.")
+        else:
+            if ek_notice == "high_ek":
+                st.warning(
+                    "Hinweis: Bei einem Netto-EK über 500,00 € ist der Preis im "
+                    "4-Augen-Prinzip bzw. mit Arijana oder Roman abzustimmen."
+                )
+            with st.container(border=True):
+                render_recommendation_card(
+                    "Empfohlener Preis für das Angebot",
+                    result["rounded_vk"],
+                    "EK+ Richtwert",
+                    f"{result['product_type']} · {result['rule_tier']}",
+                    "d_ek_plus",
+                    copy_text=copy_text,
+                    subline="Direkt als Angebotspreis verwendbar",
+                    action_hint="Preis oder kurzen Angebotstext direkt kopierbar",
+                )
 
-        with st.expander("Kurze Herleitung", expanded=False):
-            st.write(f"Produktart: **{result['product_type']}**")
-            st.write(f"Gewichtsklasse: **{result['weight_class']}**")
-            st.write(f"Längenklasse: **{result['length_class']}**")
-            st.write(f"Regelstufe: **{result['rule_tier']}**")
-            st.write(f"EK netto: **{format_eur(result['ek_net'])}**")
-            st.write(f"Basisaufschlag: **{format_eur(result['base_markup'])}**")
-            st.write(f"Produktart-Zuschlag: **{format_eur(result['product_surcharge'])}**")
-            st.write(f"Feinjustierung: **{result['adjustment_label']}** ({adjustment_detail})")
-            st.write(f"Verwendeter Aufschlag: **{format_eur(result['adjusted_markup'])}**")
-            st.write(
-                f"Rundung: {format_eur(result['unrounded_vk'])} -> "
-                f"{format_eur(result['rounded_vk'])} "
-                "(abgerundet auf nächstniedrigeren Preis mit Endziffer 9)"
-            )
+            with st.expander("Kurze Herleitung", expanded=False):
+                st.write(f"Produktart: **{result['product_type']}**")
+                st.write(f"Gewichtsklasse: **{result['weight_class']}**")
+                st.write(f"Längenklasse: **{result['length_class']}**")
+                st.write(f"Regelstufe: **{result['rule_tier']}**")
+                st.write(f"EK netto: **{format_eur(result['ek_net'])}**")
+                st.write(f"Basisaufschlag: **{format_eur(result['base_markup'])}**")
+                st.write(f"Produktart-Zuschlag: **{format_eur(result['product_surcharge'])}**")
+                st.write(f"Feinjustierung: **{result['adjustment_label']}** ({adjustment_detail})")
+                st.write(f"Verwendeter Aufschlag: **{format_eur(result['adjusted_markup'])}**")
+                st.write(
+                    f"Rundung: {format_eur(result['unrounded_vk'])} -> "
+                    f"{format_eur(result['rounded_vk'])} "
+                    "(abgerundet auf nächstniedrigeren Preis mit Endziffer 9)"
+                )
 
 
 def main():

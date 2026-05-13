@@ -309,6 +309,16 @@ def run_tests():
     assert app.round_down_to_price_ending_9(173) == 169
     assert app.round_down_to_price_ending_9(299) == 299
 
+    # 22) D-Hinweislogik: EK 0 fordert Netto-EK an
+    assert app.get_case_d_ek_notice(0.0) == "missing_ek"
+
+    # 23) D-Hinweislogik: knapp unter 500 EUR bleibt ohne Abstimmhinweis
+    assert app.get_case_d_ek_notice(499.99) is None
+    assert app.get_case_d_ek_notice(500.0) is None
+
+    # 24) D-Hinweislogik: ueber 500 EUR fordert 4-Augen-Abstimmung
+    assert app.get_case_d_ek_notice(500.01) == "high_ek"
+
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 
 
