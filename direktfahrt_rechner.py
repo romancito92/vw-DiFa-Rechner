@@ -220,9 +220,12 @@ def ensure_a_diesel_price_loaded(max_age_minutes=15):
         fetch_a_diesel_price_from_tankerkoenig()
 
 
-def round_to_nearest_5_eur(value):
-    """Rundet kaufmaennisch auf volle 5 EUR."""
-    return int((float(value) / 5.0) + 0.5) * 5
+def round_down_to_price_ending_9(value):
+    """Rundet auf den naechstniedrigeren Preis mit Endziffer 9 ab."""
+    integer_value = int(float(value))
+    if integer_value % 10 == 9:
+        return integer_value
+    return max(0, integer_value - (integer_value % 10) - 1)
 
 
 def determine_case_d_base_markup(weight_class, length_class):
@@ -242,11 +245,13 @@ def calculate_case_d_ek_plus(ek_net, product_type, weight_class, length_class, a
         "Int. Express": 20.0,
     }
     adjustment_factors = {
+        "-30 %": 0.70,
         "-20 %": 0.80,
         "-10 %": 0.90,
         "Standard": 1.00,
         "+10 %": 1.10,
         "+20 %": 1.20,
+        "+30 %": 1.30,
     }
     base_markup, rule_tier = determine_case_d_base_markup(weight_class, length_class)
     product_surcharge = product_surcharges[product_type]
@@ -254,7 +259,7 @@ def calculate_case_d_ek_plus(ek_net, product_type, weight_class, length_class, a
     adjustment_factor = adjustment_factors[adjustment_label]
     adjusted_markup = standard_markup * adjustment_factor
     unrounded_vk = float(ek_net) + adjusted_markup
-    rounded_vk = round_to_nearest_5_eur(unrounded_vk)
+    rounded_vk = round_down_to_price_ending_9(unrounded_vk)
 
     return {
         "ek_net": float(ek_net),
@@ -1660,10 +1665,10 @@ def show_case_b():
 def show_case_d():
     st.subheader("D - Stückgut & Int. Express (EK+)")
 
-    st.markdown("### 1. Eingabe")
     input_col, result_col = st.columns([1.05, 1.15], gap="large")
 
     with input_col:
+        st.markdown("### 1. Eingabe")
         with st.container(border=True):
             st.markdown("**EK+ Richtwert**")
             ek_net = st.number_input(
@@ -1700,8 +1705,8 @@ def show_case_d():
             st.markdown("**Feinjustierung**")
             adjustment_label = st.radio(
                 "Feinjustierung",
-                ["-20 %", "-10 %", "Standard", "+10 %", "+20 %"],
-                index=2,
+                ["-30 %", "-20 %", "-10 %", "Standard", "+10 %", "+20 %", "+30 %"],
+                index=3,
                 horizontal=True,
                 label_visibility="collapsed",
                 key="d_adjustment_label",
@@ -1738,23 +1743,21 @@ def show_case_d():
                 action_hint="Preis oder kurzen Angebotstext direkt kopierbar",
             )
 
-        with st.container(border=True):
-            st.markdown("**Kompakte Herleitung**")
+        with st.expander("Kurze Herleitung", expanded=False):
+            st.write(f"Produktart: **{result['product_type']}**")
+            st.write(f"Gewichtsklasse: **{result['weight_class']}**")
+            st.write(f"Längenklasse: **{result['length_class']}**")
+            st.write(f"Regelstufe: **{result['rule_tier']}**")
             st.write(f"EK netto: **{format_eur(result['ek_net'])}**")
             st.write(f"Basisaufschlag: **{format_eur(result['base_markup'])}**")
             st.write(f"Produktart-Zuschlag: **{format_eur(result['product_surcharge'])}**")
             st.write(f"Feinjustierung: **{result['adjustment_label']}** ({adjustment_detail})")
             st.write(f"Verwendeter Aufschlag: **{format_eur(result['adjusted_markup'])}**")
-
-    with st.expander("Kurze Herleitung", expanded=False):
-        st.write(f"Produktart: **{result['product_type']}**")
-        st.write(f"Gewichtsklasse: **{result['weight_class']}**")
-        st.write(f"Längenklasse: **{result['length_class']}**")
-        st.write(f"Regelstufe: **{result['rule_tier']}**")
-        st.write(
-            f"Rundung: {format_eur(result['unrounded_vk'])} -> "
-            f"{format_eur(result['rounded_vk'])} (auf volle 5 EUR)"
-        )
+            st.write(
+                f"Rundung: {format_eur(result['unrounded_vk'])} -> "
+                f"{format_eur(result['rounded_vk'])} "
+                "(abgerundet auf nächstniedrigeren Preis mit Endziffer 9)"
+            )
 
 
 def main():

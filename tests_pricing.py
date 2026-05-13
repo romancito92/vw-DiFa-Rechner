@@ -263,7 +263,7 @@ def run_tests():
     assert d_light["rule_tier"] == "Leicht / kompakt"
     assert round(d_light["base_markup"], 2) == 80.00
     assert round(d_light["adjusted_markup"], 2) == 80.00
-    assert d_light["rounded_vk"] == 560
+    assert d_light["rounded_vk"] == 559
 
     # 18) D-Fall: Ausland mittel mit +10 % justiert nur den Aufschlag
     d_medium = app.calculate_case_d_ek_plus(
@@ -276,7 +276,7 @@ def run_tests():
     assert d_medium["rule_tier"] == "Mittel"
     assert round(d_medium["standard_markup"], 2) == 120.00
     assert round(d_medium["adjusted_markup"], 2) == 132.00
-    assert d_medium["rounded_vk"] == 610
+    assert d_medium["rounded_vk"] == 609
 
     # 19) D-Fall: Laenge ab 250 cm zieht die hoechste Stufe, nicht additiv
     d_long = app.calculate_case_d_ek_plus(
@@ -284,16 +284,30 @@ def run_tests():
         "Int. Express",
         "unter 100 kg",
         "ab 250 cm",
-        "-20 %",
+        "-30 %",
     )
     assert d_long["rule_tier"] == "Schwer / lang"
     assert round(d_long["standard_markup"], 2) == 170.00
-    assert round(d_long["adjusted_markup"], 2) == 136.00
-    assert d_long["rounded_vk"] == 615
+    assert round(d_long["adjusted_markup"], 2) == 119.00
+    assert d_long["rounded_vk"] == 599
 
-    # 20) D-Rundung erfolgt kaufmaennisch auf volle 5 EUR
-    assert app.round_to_nearest_5_eur(612.49) == 610
-    assert app.round_to_nearest_5_eur(612.50) == 615
+    # 20) D-Fall: +30 % wirkt weiterhin nur auf den Aufschlag
+    d_high_adjustment = app.calculate_case_d_ek_plus(
+        480.0,
+        "Stückgut Ausland",
+        "100 bis 200 kg",
+        "unter 250 cm",
+        "+30 %",
+    )
+    assert round(d_high_adjustment["standard_markup"], 2) == 120.00
+    assert round(d_high_adjustment["adjusted_markup"], 2) == 156.00
+    assert d_high_adjustment["rounded_vk"] == 629
+
+    # 21) D-Rundung erfolgt abwaerts auf den naechstniedrigeren Preis mit Endziffer 9
+    assert app.round_down_to_price_ending_9(277) == 269
+    assert app.round_down_to_price_ending_9(305) == 299
+    assert app.round_down_to_price_ending_9(173) == 169
+    assert app.round_down_to_price_ending_9(299) == 299
 
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 
