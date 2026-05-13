@@ -252,6 +252,49 @@ def run_tests():
         for label, amount in lz48_dim_surcharge_2["carrier_surcharge_breakdown"]
     )
 
+    # 17) D-Fall: leicht/kompakt nutzt 80 EUR Basisaufschlag
+    d_light = app.calculate_case_d_ek_plus(
+        480.0,
+        "Stückgut Inland",
+        "unter 100 kg",
+        "unter 250 cm",
+        "Standard",
+    )
+    assert d_light["rule_tier"] == "Leicht / kompakt"
+    assert round(d_light["base_markup"], 2) == 80.00
+    assert round(d_light["adjusted_markup"], 2) == 80.00
+    assert d_light["rounded_vk"] == 560
+
+    # 18) D-Fall: Ausland mittel mit +10 % justiert nur den Aufschlag
+    d_medium = app.calculate_case_d_ek_plus(
+        480.0,
+        "Stückgut Ausland",
+        "100 bis 200 kg",
+        "unter 250 cm",
+        "+10 %",
+    )
+    assert d_medium["rule_tier"] == "Mittel"
+    assert round(d_medium["standard_markup"], 2) == 120.00
+    assert round(d_medium["adjusted_markup"], 2) == 132.00
+    assert d_medium["rounded_vk"] == 610
+
+    # 19) D-Fall: Laenge ab 250 cm zieht die hoechste Stufe, nicht additiv
+    d_long = app.calculate_case_d_ek_plus(
+        480.0,
+        "Int. Express",
+        "unter 100 kg",
+        "ab 250 cm",
+        "-20 %",
+    )
+    assert d_long["rule_tier"] == "Schwer / lang"
+    assert round(d_long["standard_markup"], 2) == 170.00
+    assert round(d_long["adjusted_markup"], 2) == 136.00
+    assert d_long["rounded_vk"] == 615
+
+    # 20) D-Rundung erfolgt kaufmaennisch auf volle 5 EUR
+    assert app.round_to_nearest_5_eur(612.49) == 610
+    assert app.round_to_nearest_5_eur(612.50) == 615
+
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 
 

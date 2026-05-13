@@ -220,6 +220,59 @@ def ensure_a_diesel_price_loaded(max_age_minutes=15):
         fetch_a_diesel_price_from_tankerkoenig()
 
 
+def round_to_nearest_5_eur(value):
+    """Rundet kaufmaennisch auf volle 5 EUR."""
+    return int((float(value) / 5.0) + 0.5) * 5
+
+
+def determine_case_d_base_markup(weight_class, length_class):
+    """Ermittelt die stufenbasierte EK+-Aufschlagsbasis fuer Modus D."""
+    if weight_class == "über 200 kg" or length_class == "ab 250 cm":
+        return 150.0, "Schwer / lang"
+    if weight_class == "100 bis 200 kg" and length_class == "unter 250 cm":
+        return 110.0, "Mittel"
+    return 80.0, "Leicht / kompakt"
+
+
+def calculate_case_d_ek_plus(ek_net, product_type, weight_class, length_class, adjustment_label):
+    """Berechnet den pragmatischen EK+-Richtwert fuer Modus D."""
+    product_surcharges = {
+        "Stückgut Inland": 0.0,
+        "Stückgut Ausland": 10.0,
+        "Int. Express": 20.0,
+    }
+    adjustment_factors = {
+        "-20 %": 0.80,
+        "-10 %": 0.90,
+        "Standard": 1.00,
+        "+10 %": 1.10,
+        "+20 %": 1.20,
+    }
+    base_markup, rule_tier = determine_case_d_base_markup(weight_class, length_class)
+    product_surcharge = product_surcharges[product_type]
+    standard_markup = base_markup + product_surcharge
+    adjustment_factor = adjustment_factors[adjustment_label]
+    adjusted_markup = standard_markup * adjustment_factor
+    unrounded_vk = float(ek_net) + adjusted_markup
+    rounded_vk = round_to_nearest_5_eur(unrounded_vk)
+
+    return {
+        "ek_net": float(ek_net),
+        "product_type": product_type,
+        "weight_class": weight_class,
+        "length_class": length_class,
+        "rule_tier": rule_tier,
+        "base_markup": base_markup,
+        "product_surcharge": product_surcharge,
+        "standard_markup": standard_markup,
+        "adjustment_label": adjustment_label,
+        "adjustment_factor": adjustment_factor,
+        "adjusted_markup": adjusted_markup,
+        "unrounded_vk": unrounded_vk,
+        "rounded_vk": rounded_vk,
+    }
+
+
 def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, include_approach):
     """Berechnet optional die Anfahrt vom Hauptstandort plus die eigentliche Strecke."""
     route_segments = []
@@ -1602,6 +1655,108 @@ def show_case_b():
             "Genutzte Sätze (EUR/km): "
             f"min {rates['min']:.2f}, mittel {rates['mittel']:.2f}, max {rates['max']:.2f}"
         )
+
+
+def show_case_d():
+    st.subheader("D - Stückgut & Int. Express (EK+)")
+
+    st.markdown("### 1. Eingabe")
+    input_col, result_col = st.columns([1.05, 1.15], gap="large")
+
+    with input_col:
+        with st.container(border=True):
+            st.markdown("**EK+ Richtwert**")
+            ek_net = st.number_input(
+                "Einkaufspreis netto (EK)",
+                min_value=0.0,
+                step=10.0,
+                format="%.2f",
+                key="d_ek_net",
+            )
+
+            st.markdown("**Produktart**")
+            product_type = st.radio(
+                "Produktart",
+                ["Stückgut Inland", "Stückgut Ausland", "Int. Express"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="d_product_type",
+            )
+
+            weight_col, length_col = st.columns(2, gap="large")
+            with weight_col:
+                weight_class = st.selectbox(
+                    "Gewichtsklasse",
+                    ["unter 100 kg", "100 bis 200 kg", "über 200 kg"],
+                    key="d_weight_class",
+                )
+            with length_col:
+                length_class = st.selectbox(
+                    "Längenklasse",
+                    ["unter 250 cm", "ab 250 cm"],
+                    key="d_length_class",
+                )
+
+            st.markdown("**Feinjustierung**")
+            adjustment_label = st.radio(
+                "Feinjustierung",
+                ["-20 %", "-10 %", "Standard", "+10 %", "+20 %"],
+                index=2,
+                horizontal=True,
+                label_visibility="collapsed",
+                key="d_adjustment_label",
+                help="Wirkt nur auf den Aufschlag, nicht auf den EK.",
+            )
+            st.caption("Die Feinjustierung passt nur den empfohlenen Aufschlag an.")
+
+    result = calculate_case_d_ek_plus(
+        ek_net,
+        product_type,
+        weight_class,
+        length_class,
+        adjustment_label,
+    )
+    adjustment_pct = int(round((result["adjustment_factor"] - 1.0) * 100))
+    adjustment_detail = "ohne Anpassung" if adjustment_pct == 0 else f"{adjustment_pct:+d} % auf den Aufschlag"
+    copy_text = (
+        "Nochmals vielen Dank für Ihre Anfrage.\n\n"
+        f"Gerne bieten wir Ihnen die Sendung für {format_eur(result['rounded_vk'])} netto an.\n\n"
+        "Der Preis basiert auf einem internen EK+ Richtwert."
+    )
+
+    with result_col:
+        st.markdown("### 2. Ergebnis")
+        with st.container(border=True):
+            render_recommendation_card(
+                "Empfohlener Preis für das Angebot",
+                result["rounded_vk"],
+                "EK+ Richtwert",
+                f"{result['product_type']} · {result['rule_tier']}",
+                "d_ek_plus",
+                copy_text=copy_text,
+                subline="Direkt als Angebotspreis verwendbar",
+                action_hint="Preis oder kurzen Angebotstext direkt kopierbar",
+            )
+
+        with st.container(border=True):
+            st.markdown("**Kompakte Herleitung**")
+            st.write(f"EK netto: **{format_eur(result['ek_net'])}**")
+            st.write(f"Basisaufschlag: **{format_eur(result['base_markup'])}**")
+            st.write(f"Produktart-Zuschlag: **{format_eur(result['product_surcharge'])}**")
+            st.write(f"Feinjustierung: **{result['adjustment_label']}** ({adjustment_detail})")
+            st.write(f"Verwendeter Aufschlag: **{format_eur(result['adjusted_markup'])}**")
+
+    with st.expander("Kurze Herleitung", expanded=False):
+        st.write(f"Produktart: **{result['product_type']}**")
+        st.write(f"Gewichtsklasse: **{result['weight_class']}**")
+        st.write(f"Längenklasse: **{result['length_class']}**")
+        st.write(f"Regelstufe: **{result['rule_tier']}**")
+        st.write(
+            f"Rundung: {format_eur(result['unrounded_vk'])} -> "
+            f"{format_eur(result['rounded_vk'])} (auf volle 5 EUR)"
+        )
+
+
 def main():
     st.set_page_config(page_title="Versandwerk Preisrechner [intern]", layout="wide")
     configure_app_logger()
@@ -1627,7 +1782,12 @@ def main():
 
     mode = st.radio(
         "Bitte Modus wählen",
-        ["A - Selbst fahren", "B - Extern vergeben", "C - Paketversand Deutschland"],
+        [
+            "A - Selbst fahren",
+            "B - Extern vergeben",
+            "C - Paketversand Deutschland",
+            "D - Stückgut & Int. Express (EK+)",
+        ],
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1636,8 +1796,10 @@ def main():
         show_case_a()
     elif mode == "B - Extern vergeben":
         show_case_b()
-    else:
+    elif mode == "C - Paketversand Deutschland":
         show_case_c()
+    else:
+        show_case_d()
 
 
 if __name__ == "__main__":
