@@ -1737,7 +1737,7 @@ def show_case_d():
     copy_text = (
         "Nochmals vielen Dank für Ihre Anfrage.\n\n"
         f"Gerne bieten wir Ihnen die Sendung für {format_eur(result['rounded_vk'])} netto an.\n\n"
-        "Der Preis basiert auf einem internen EK+ Richtwert."
+        "Über Ihre Beauftragung würden wir uns sehr freuen!"
     )
 
     with result_col:
