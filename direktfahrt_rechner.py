@@ -26,7 +26,12 @@ from config import (
     get_tankerkoenig_api_key,
 )
 from logging_helpers import configure_app_logger
-from ors_helpers import get_ors_address_suggestions, get_ors_distance_and_duration
+from ors_helpers import (
+    build_ors_failure_feedback,
+    get_ors_address_suggestions,
+    get_ors_distance_and_duration,
+    get_ors_distance_and_duration_robust,
+)
 from tankerkoenig_helpers import get_nearby_diesel_price
 from ui_helpers import (
     format_eur,
@@ -293,7 +298,7 @@ def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, inc
     route_segments = []
 
     if include_approach:
-        approach_km, approach_minutes = get_ors_distance_and_duration(
+        approach_km, approach_minutes = get_ors_distance_and_duration_robust(
             A_MAIN_SITE_ADDRESS,
             start_address,
             api_key,
@@ -307,7 +312,7 @@ def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, inc
             }
         )
 
-    trip_km, trip_minutes = get_ors_distance_and_duration(
+    trip_km, trip_minutes = get_ors_distance_and_duration_robust(
         start_address,
         target_address,
         api_key,
@@ -1001,16 +1006,24 @@ def show_case_a():
                                         state="complete",
                                     )
                                 except Exception as exc:
-                                    st.session_state["a_ors_feedback"] = {
-                                        "state": "error",
-                                        "message": f"ORS-Fehler: {exc}",
-                                    }
+                                    st.session_state["a_ors_feedback"] = build_ors_failure_feedback(
+                                        exc,
+                                        start_address,
+                                        target_address,
+                                    )
                                     status.update(label="ORS-Abruf fehlgeschlagen.", state="error")
 
                     ors_feedback = st.session_state.get("a_ors_feedback")
                     if ors_feedback:
                         if ors_feedback["state"] == "error":
-                            st.error(ors_feedback["message"])
+                            st.warning(ors_feedback["message"])
+                            maps_url = ors_feedback.get("maps_url")
+                            if maps_url:
+                                st.link_button("Route in Google Maps öffnen", maps_url)
+                            details = ors_feedback.get("details")
+                            if details:
+                                with st.expander("Technische Details anzeigen", expanded=False):
+                                    st.code(details, language="text")
 
                 ors_last_result = st.session_state.get("a_ors_last_result")
                 if ors_last_result:
