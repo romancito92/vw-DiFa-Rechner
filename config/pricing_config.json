@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "modes": {
+    "A": {
+      "label": "Selber fahren",
+      "vehicles": {
+        "transporter": {
+          "label": "Transporter",
+          "base_price_eur": 29.0,
+          "km_price_eur": 1.3
+        },
+        "transporter_liftgate": {
+          "label": "Transporter mit Hebebühne",
+          "base_price_eur": 39.0,
+          "km_price_eur": 1.45
+        }
+      }
+    }
+  },
+  "audit": {
+    "updated_at": null,
+    "updated_by": null,
+    "change_comment": null
+  }
+}

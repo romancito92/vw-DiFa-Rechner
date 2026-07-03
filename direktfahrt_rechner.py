@@ -51,6 +51,7 @@ from ui_helpers import (
     render_recommendation_card,
 )
 from logic_direct import (
+    build_case_a_preview,
     get_distance_class,
     calculate_case_a,
     calculate_case_b_ek,
@@ -64,6 +65,11 @@ from logic_parcel import (
     evaluate_shipment_eligibility,
     evaluate_carrier_eligibility,
     calculate_case_c_tariff,
+)
+from pricing_config import (
+    PricingConfigError,
+    load_pricing_config,
+    save_pricing_config,
 )
 
 
@@ -912,6 +918,12 @@ def show_case_c():
 def show_case_a():
     st.subheader("A - Selbst fahren")
 
+    try:
+        pricing_config = load_pricing_config()
+    except PricingConfigError as exc:
+        st.error(f"Preiskonfiguration für Modus A ist nicht verfügbar: {exc}")
+        st.stop()
+
     if "a_km" not in st.session_state:
         st.session_state["a_km"] = 92.0
     if "a_minutes" not in st.session_state:
@@ -1061,7 +1073,7 @@ def show_case_a():
                 render_icon_toggle(
                     "Hebebühnenzuschlag",
                     "a_liftgate_required",
-                    "A.1: 39,00 EUR Basis und +0,15 EUR/km. A.2: +20 %. Nur, falls kundenseitig erwünscht/erforderlich.",
+                    "A.1 verwendet die zentral gepflegten Hebebühnenpreise. A.2: +20 %. Nur, falls kundenseitig erwünscht/erforderlich.",
                     icon_path=str(liftgate_icon_path) if liftgate_icon_path.exists() else None,
                     on_change=sync_a_vehicle_for_liftgate,
                 )
@@ -1176,6 +1188,7 @@ def show_case_a():
         one_way_minutes,
         a1_extra_per_km,
         st.session_state["a_liftgate_required"],
+        pricing_config,
     )
     rounded_lower_price = round_down_to_odd_price(lower_price)
     rounded_mid_price = round_down_to_odd_price(price_mid)
@@ -1792,6 +1805,140 @@ def show_case_d():
                 )
 
 
+def show_pricing_system_settings():
+    """Render the server-side protected pricing administration view."""
+    if get_user_role() != "admin":
+        st.error("Kein Zugriff auf diese Seite.")
+        st.stop()
+
+    st.subheader("Preis- & Systemeinstellungen")
+    try:
+        pricing_config = load_pricing_config()
+    except PricingConfigError as exc:
+        st.error(f"Preiskonfiguration konnte nicht geladen werden: {exc}")
+        return
+
+    st.markdown("### Modus A – Selber fahren")
+    st.caption("Die Änderungen wirken auf die kilometerbasierte A.1-Formel.")
+    vehicles = pricing_config["modes"]["A"]["vehicles"]
+
+    transporter_col, liftgate_col = st.columns(2, gap="large")
+    with transporter_col:
+        with st.container(border=True):
+            st.markdown("**Transporter**")
+            transporter_base = st.number_input(
+                "Basispreis (EUR)",
+                min_value=0.0,
+                step=0.50,
+                format="%.2f",
+                value=float(vehicles["transporter"]["base_price_eur"]),
+                key="admin_a_transporter_base",
+            )
+            transporter_km = st.number_input(
+                "Kilometerpreis (EUR/km)",
+                min_value=0.0,
+                step=0.01,
+                format="%.2f",
+                value=float(vehicles["transporter"]["km_price_eur"]),
+                key="admin_a_transporter_km",
+            )
+    with liftgate_col:
+        with st.container(border=True):
+            st.markdown("**Transporter mit Hebebühne**")
+            liftgate_base = st.number_input(
+                "Basispreis (EUR)",
+                min_value=0.0,
+                step=0.50,
+                format="%.2f",
+                value=float(vehicles["transporter_liftgate"]["base_price_eur"]),
+                key="admin_a_liftgate_base",
+            )
+            liftgate_km = st.number_input(
+                "Kilometerpreis (EUR/km)",
+                min_value=0.0,
+                step=0.01,
+                format="%.2f",
+                value=float(vehicles["transporter_liftgate"]["km_price_eur"]),
+                key="admin_a_liftgate_km",
+            )
+
+    updated_config = {
+        **pricing_config,
+        "modes": {
+            **pricing_config["modes"],
+            "A": {
+                **pricing_config["modes"]["A"],
+                "vehicles": {
+                    **vehicles,
+                    "transporter": {
+                        **vehicles["transporter"],
+                        "base_price_eur": round(float(transporter_base), 2),
+                        "km_price_eur": round(float(transporter_km), 2),
+                    },
+                    "transporter_liftgate": {
+                        **vehicles["transporter_liftgate"],
+                        "base_price_eur": round(float(liftgate_base), 2),
+                        "km_price_eur": round(float(liftgate_km), 2),
+                    },
+                },
+            },
+        },
+    }
+
+    st.markdown("#### Vorschau für 92 km und 72 Minuten")
+    transporter_preview = build_case_a_preview(updated_config, liftgate_required=False)
+    liftgate_preview = build_case_a_preview(updated_config, liftgate_required=True)
+    st.table(
+        [
+            {
+                "Fahrzeug": "Transporter",
+                "A.1 roh": format_eur(transporter_preview["price_a1_raw"]),
+                "A.1 gerundet": format_eur(transporter_preview["price_a1_rounded"]),
+                "A.2 gerundet": format_eur(transporter_preview["price_a2_rounded"]),
+                "Untergrenze": format_eur(transporter_preview["lower_rounded"]),
+                "Mittelwert": format_eur(transporter_preview["mid_rounded"]),
+                "Obergrenze": format_eur(transporter_preview["upper_rounded"]),
+            },
+            {
+                "Fahrzeug": "Transporter mit Hebebühne",
+                "A.1 roh": format_eur(liftgate_preview["price_a1_raw"]),
+                "A.1 gerundet": format_eur(liftgate_preview["price_a1_rounded"]),
+                "A.2 gerundet": format_eur(liftgate_preview["price_a2_rounded"]),
+                "Untergrenze": format_eur(liftgate_preview["lower_rounded"]),
+                "Mittelwert": format_eur(liftgate_preview["mid_rounded"]),
+                "Obergrenze": format_eur(liftgate_preview["upper_rounded"]),
+            },
+        ]
+    )
+    st.caption("Vorschau ohne Spritaufschlag.")
+
+    change_comment = st.text_input(
+        "Änderungskommentar (optional)",
+        key="admin_pricing_change_comment",
+        placeholder="Kurzer Grund für die Preisänderung",
+    )
+    if st.button("Preise speichern", type="primary", key="admin_save_pricing"):
+        current_user_email = get_user_email()
+        if not current_user_email:
+            st.error("Preise konnten nicht gespeichert werden: Angemeldete E-Mail-Adresse fehlt.")
+        else:
+            try:
+                save_pricing_config(updated_config, current_user_email, change_comment)
+            except PermissionError:
+                st.error("Kein Zugriff auf diese Seite.")
+            except PricingConfigError as exc:
+                st.error(f"Preise konnten nicht gespeichert werden: {exc}")
+            else:
+                st.success("Preiseinstellungen wurden gespeichert.")
+
+    audit = pricing_config.get("audit", {})
+    if audit.get("updated_at"):
+        st.caption(
+            f"Letzte Änderung: {audit['updated_at']} durch {audit.get('updated_by') or '-'}"
+            + (f" · {audit['change_comment']}" if audit.get("change_comment") else "")
+        )
+
+
 def main():
     st.set_page_config(page_title="Versandwerk Preisrechner [intern]", layout="wide")
     configure_app_logger()
@@ -1815,14 +1962,18 @@ def main():
         if cfg_caption:
             st.caption(cfg_caption)
 
+    modes = [
+        "A - Selbst fahren",
+        "B - Extern vergeben",
+        "C - Paketversand Deutschland",
+        "D - Stückgut & Int. Express (EK+)",
+    ]
+    if get_user_role() == "admin":
+        modes.append("Preis- & Systemeinstellungen")
+
     mode = st.radio(
         "Bitte Modus wählen",
-        [
-            "A - Selbst fahren",
-            "B - Extern vergeben",
-            "C - Paketversand Deutschland",
-            "D - Stückgut & Int. Express (EK+)",
-        ],
+        modes,
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1833,8 +1984,10 @@ def main():
         show_case_b()
     elif mode == "C - Paketversand Deutschland":
         show_case_c()
-    else:
+    elif mode == "D - Stückgut & Int. Express (EK+)":
         show_case_d()
+    else:
+        show_pricing_system_settings()
 
 
 if __name__ == "__main__":

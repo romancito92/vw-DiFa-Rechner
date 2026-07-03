@@ -1,4 +1,5 @@
 from config import RATE_TABLE
+from pricing_config import load_pricing_config, validate_pricing_config
 
 
 def round_down_to_odd_price(value):
@@ -25,10 +26,16 @@ def calculate_case_a(
     one_way_minutes,
     a1_extra_per_km=0.0,
     liftgate_required=False,
+    pricing_config=None,
 ):
     """Berechnet dynamische Unter-/Obergrenze, Mittelwert und Gesamtminuten für Fall A."""
-    a1_base_fee = 39.0 if liftgate_required else 29.0
-    a1_rate_per_km = 1.45 if liftgate_required else 1.30
+    if pricing_config is None:
+        pricing_config = load_pricing_config()
+    validate_pricing_config(pricing_config)
+    vehicle_key = "transporter_liftgate" if liftgate_required else "transporter"
+    vehicle_pricing = pricing_config["modes"]["A"]["vehicles"][vehicle_key]
+    a1_base_fee = float(vehicle_pricing["base_price_eur"])
+    a1_rate_per_km = float(vehicle_pricing["km_price_eur"])
     a2_multiplier = 1.20 if liftgate_required else 1.00
 
     price_a1_base = a1_base_fee + (a1_rate_per_km * km)
@@ -54,6 +61,42 @@ def calculate_case_a(
         a1_rate_per_km,
         a2_multiplier,
     )
+
+
+def build_case_a_preview(
+    pricing_config,
+    km=92,
+    one_way_minutes=72,
+    liftgate_required=False,
+):
+    """Build an admin preview using the exact Mode A calculation and rounding rules."""
+    (
+        lower_price,
+        price_mid,
+        upper_price,
+        _,
+        price_a1,
+        price_a2,
+        _,
+        _,
+        _,
+        _,
+        _,
+    ) = calculate_case_a(
+        km,
+        one_way_minutes,
+        a1_extra_per_km=0.0,
+        liftgate_required=liftgate_required,
+        pricing_config=pricing_config,
+    )
+    return {
+        "price_a1_raw": price_a1,
+        "price_a1_rounded": round_down_to_odd_price(price_a1),
+        "price_a2_rounded": round_down_to_odd_price(price_a2),
+        "lower_rounded": round_down_to_odd_price(lower_price),
+        "mid_rounded": round_down_to_odd_price(price_mid),
+        "upper_rounded": round_down_to_odd_price(upper_price),
+    }
 
 
 def calculate_case_b_ek(ek_price):
