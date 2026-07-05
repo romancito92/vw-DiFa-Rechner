@@ -31,6 +31,7 @@ RATE_TABLE = {
 PARCEL_CONFIG_PATH = Path(__file__).with_name("parcel_tariffs_de.json")
 
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
+ORS_REVERSE_GEOCODE_URL = "https://api.openrouteservice.org/geocode/reverse"
 ORS_DIRECTIONS_URL_TEMPLATE = "https://api.openrouteservice.org/v2/directions/{profile}"
 TANKERKOENIG_LIST_URL = "https://creativecommons.tankerkoenig.de/json/list.php"
 TANKERKOENIG_DEMO_API_KEY = "00000000-0000-0000-0000-000000000002"

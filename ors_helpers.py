@@ -6,7 +6,7 @@ import pycountry
 import requests
 import streamlit as st
 
-from config import ORS_DIRECTIONS_URL_TEMPLATE, ORS_GEOCODE_URL
+from config import ORS_DIRECTIONS_URL_TEMPLATE, ORS_GEOCODE_URL, ORS_REVERSE_GEOCODE_URL
 
 
 ORS_GEOCODE_LANGUAGE = "de"
@@ -201,6 +201,35 @@ def _format_address_suggestion(props, fallback_postal_code=""):
     return _join_non_empty([street_line, city_line, country])
 
 
+@st.cache_data(ttl=86400, show_spinner=False)
+def _reverse_lookup_postal_code(longitude, latitude, api_key, country_code=""):
+    """Resolve a missing postal code from a candidate coordinate via ORS address data."""
+    response = requests.get(
+        ORS_REVERSE_GEOCODE_URL,
+        params={
+            "api_key": api_key,
+            "point.lon": float(longitude),
+            "point.lat": float(latitude),
+            "size": 5,
+            "layers": "address",
+            "lang": ORS_GEOCODE_LANGUAGE,
+        },
+        timeout=20,
+    )
+    if not response.ok:
+        _raise_ors_error(response)
+    expected_country = str(country_code or "").upper()
+    for feature in response.json().get("features", []):
+        props = feature.get("properties", {})
+        feature_country = str(props.get("country_a") or "").upper()
+        if expected_country and feature_country and feature_country != expected_country:
+            continue
+        postal_code = props.get("postalcode") or props.get("postal_code")
+        if postal_code:
+            return str(postal_code).strip()
+    return ""
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_ors_address_suggestions(query, api_key):
     """Liefert bis zu 5 Adressvorschläge für Autocomplete."""
@@ -219,9 +248,31 @@ def get_ors_address_suggestions(query, api_key):
     fallback_postal_code = _extract_german_postal_code(query)
     for feature in features:
         props = feature.get("properties", {})
+        postal_code = props.get("postalcode") or props.get("postal_code")
+        country_code = str(props.get("country_a") or "").upper()
+        country_name = str(props.get("country") or "").strip().casefold()
+        uses_query_postal_code = bool(fallback_postal_code) and (
+            country_code in GERMAN_COUNTRY_CODES
+            or country_name in {"germany", "deutschland"}
+        )
+        formatted_props = props
+        if not postal_code and not uses_query_postal_code:
+            coordinates = feature.get("geometry", {}).get("coordinates") or []
+            if len(coordinates) >= 2:
+                try:
+                    reverse_postal_code = _reverse_lookup_postal_code(
+                        coordinates[0],
+                        coordinates[1],
+                        api_key,
+                        props.get("country_a") or "",
+                    )
+                    if reverse_postal_code:
+                        formatted_props = {**props, "postalcode": reverse_postal_code}
+                except Exception:
+                    pass
         label = (
             _format_address_suggestion(
-                props,
+                formatted_props,
                 fallback_postal_code=fallback_postal_code,
             )
             or props.get("label")

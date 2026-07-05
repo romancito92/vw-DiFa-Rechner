@@ -7,6 +7,7 @@ from ors_helpers import (
     _build_geocode_params,
     _extract_german_postal_code,
     _format_address_suggestion,
+    _reverse_lookup_postal_code,
     _to_iso2_country_code,
     build_google_maps_directions_url,
     build_ors_failure_feedback,
@@ -182,6 +183,83 @@ def run_tests():
         "57072 Siegen, DE",
         "Siegen, US",
         "57258 Freudenberg, DE",
+    ]
+
+    def fake_reverse_get(url, params, timeout):
+        assert url == ors_helpers.ORS_REVERSE_GEOCODE_URL
+        assert params["layers"] == "address"
+        return DummyResponse(
+            True,
+            {
+                "features": [
+                    {
+                        "properties": {
+                            "postalcode": "56179",
+                            "country_a": "DEU",
+                        }
+                    }
+                ]
+            },
+        )
+
+    try:
+        ors_helpers.requests.get = fake_reverse_get
+        _reverse_lookup_postal_code.clear()
+        assert _reverse_lookup_postal_code(7.60713, 50.394447, "demo-key", "DEU") == "56179"
+    finally:
+        ors_helpers.requests.get = original_get
+        _reverse_lookup_postal_code.clear()
+
+    enrichment_calls = []
+
+    def fake_enriched_suggestion_get(url, params, timeout):
+        enrichment_calls.append(url)
+        if url == ors_helpers.ORS_GEOCODE_URL:
+            return DummyResponse(
+                True,
+                {
+                    "features": [
+                        {
+                            "geometry": {"coordinates": [7.60713, 50.394447]},
+                            "properties": {
+                                "name": "Niederwerth",
+                                "locality": "Niederwerth",
+                                "country": "Deutschland",
+                                "country_a": "DEU",
+                            },
+                        }
+                    ]
+                },
+            )
+        return DummyResponse(
+            True,
+            {
+                "features": [
+                    {
+                        "properties": {
+                            "postalcode": "56179",
+                            "country_a": "DEU",
+                        }
+                    }
+                ]
+            },
+        )
+
+    try:
+        ors_helpers.requests.get = fake_enriched_suggestion_get
+        ors_helpers.get_ors_address_suggestions.clear()
+        _reverse_lookup_postal_code.clear()
+        assert ors_helpers.get_ors_address_suggestions("Niederwerth", "demo-key") == [
+            "56179 Niederwerth, DE"
+        ]
+    finally:
+        ors_helpers.requests.get = original_get
+        ors_helpers.get_ors_address_suggestions.clear()
+        _reverse_lookup_postal_code.clear()
+
+    assert enrichment_calls == [
+        ors_helpers.ORS_GEOCODE_URL,
+        ors_helpers.ORS_REVERSE_GEOCODE_URL,
     ]
 
     def fake_get(url, params, timeout):
