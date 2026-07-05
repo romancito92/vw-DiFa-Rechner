@@ -378,6 +378,11 @@ def _validated_manual_routing_candidates(query, candidates):
     ]
     if matching_candidates:
         return matching_candidates
+    unconfirmed_candidates = [
+        candidate for candidate in candidates if candidate.match_type != "postal_mismatch"
+    ]
+    if unconfirmed_candidates:
+        return unconfirmed_candidates
     warning = candidates[0].warning if candidates else ""
     raise LocationResolutionError(
         warning

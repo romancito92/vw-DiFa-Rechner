@@ -30,9 +30,13 @@ def run_tests():
 
     west_candidates = get_de_postal_code_candidates("50825 Köln")
     east_candidates = get_de_postal_code_candidates("51105 Köln")
+    siegen_candidates = get_de_postal_code_candidates("57072 Siegen")
     assert west_candidates[0].display_label == "50825 Köln, DE"
     assert east_candidates[0].display_label == "51105 Köln, DE"
     assert west_candidates[0].coordinates != east_candidates[0].coordinates
+    assert west_candidates[0].coordinates == (6.9103, 50.9541)
+    assert west_candidates[0].coordinates != (50.9541, 6.9103)
+    assert siegen_candidates[0].coordinates == (8.0104, 50.8734)
     assert west_candidates[0].source == "de_postal_code_centroid"
     assert get_de_postal_code_candidates("50825 Koeln")[0].display_label == "50825 Köln, DE"
     assert get_de_postal_code_candidates("50825 Cologne")[0].display_label == "50825 Köln, DE"
@@ -59,6 +63,17 @@ def run_tests():
 
     def fake_post(url, json, headers, timeout):
         post_payloads.append(json)
+        if len(post_payloads) == 1:
+            return DummyResponse(
+                False,
+                {
+                    "error": {
+                        "code": 2010,
+                        "message": "Could not find routable point within a radius",
+                    }
+                },
+                status_code=404,
+            )
         return DummyResponse(
             True,
             {"routes": [{"summary": {"distance": 99000, "duration": 5400}}]},
@@ -83,6 +98,12 @@ def run_tests():
         list(west_candidates[0].coordinates),
         list(east_candidates[0].coordinates),
     ]
+    assert "radiuses" not in post_payloads[0]
+    assert post_payloads[1]["coordinates"] == post_payloads[0]["coordinates"]
+    assert post_payloads[1]["radiuses"] == [
+        ors_helpers.ORS_RETRY_SNAP_RADIUS_METERS,
+        ors_helpers.ORS_RETRY_SNAP_RADIUS_METERS,
+    ]
 
     mismatch = ors_helpers._build_ors_candidate(
         "Helmholtzstraße 63, 51105 Köln",
@@ -106,6 +127,22 @@ def run_tests():
         raise AssertionError("Manual routing must reject an ORS postal mismatch")
     except LocationResolutionError as exc:
         assert "stimmt nicht" in str(exc)
+
+    unconfirmed = ors_helpers._build_ors_candidate(
+        "Heeserstraße 5, 57072 Siegen",
+        {
+            "street": "Heeserstraße",
+            "housenumber": "5",
+            "locality": "Siegen",
+            "country_a": "DEU",
+        },
+        [7.9845, 50.8804],
+    )
+    assert unconfirmed.match_type == "postal_unconfirmed"
+    assert ors_helpers._validated_manual_routing_candidates(
+        "Heeserstraße 5, 57072 Siegen",
+        [unconfirmed],
+    ) == [unconfirmed]
 
     app_source = Path("direktfahrt_rechner.py").read_text(encoding="utf-8")
     assert app_source.count("address_input_with_autofill(") == 5
