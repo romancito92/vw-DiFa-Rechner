@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import ors_helpers
 from location_candidates import (
@@ -53,6 +54,14 @@ def run_tests():
     assert restored.postal_code == "50825"
     assert restored.coordinates == selected.coordinates
     assert restored.source == "de_postal_code_centroid"
+
+    maps_url = ors_helpers.build_google_maps_directions_url(
+        west_candidates[0],
+        east_candidates[0],
+    )
+    maps_params = parse_qs(urlparse(maps_url).query)
+    assert maps_params["origin"] == ["50825 Köln, DE"]
+    assert maps_params["destination"] == ["51105 Köln, DE"]
 
     original_get = ors_helpers.requests.get
     original_post = ors_helpers.requests.post
@@ -148,6 +157,7 @@ def run_tests():
     assert app_source.count("address_input_with_autofill(") == 5
     assert "get_ors_distance_and_duration(" not in app_source
     assert app_source.count("get_ors_distance_and_duration_robust(") >= 3
+    assert app_source.count('"Google Maps ↗"') == 2
 
     print("OK: Lokale PLZ-Kandidaten, Auswahlpersistenz und koordinatenbasiertes Routing funktionieren.")
 

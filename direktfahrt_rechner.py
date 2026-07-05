@@ -28,6 +28,7 @@ from config import (
 from logging_helpers import configure_app_logger
 from location_candidates import LocationCandidate, LocationResolutionError
 from ors_helpers import (
+    build_google_maps_directions_url,
     build_ors_failure_feedback,
     get_location_candidates,
     get_ors_distance_and_duration_robust,
@@ -1079,12 +1080,23 @@ def show_case_a():
                                     )
                                     status.update(label="ORS-Abruf fehlgeschlagen.", state="error")
 
+                    maps_comparison_url = build_google_maps_directions_url(
+                        start_address,
+                        target_address,
+                    )
+                    if maps_comparison_url:
+                        st.link_button(
+                            "Google Maps ↗",
+                            maps_comparison_url,
+                            width="content",
+                        )
+
                     ors_feedback = st.session_state.get("a_ors_feedback")
                     if ors_feedback:
                         if ors_feedback["state"] == "error":
                             st.warning(ors_feedback["message"])
                             maps_url = ors_feedback.get("maps_url")
-                            if maps_url:
+                            if maps_url and not maps_comparison_url:
                                 st.link_button("Route in Google Maps öffnen", maps_url)
                             details = ors_feedback.get("details")
                             if details:
@@ -1485,6 +1497,17 @@ def show_case_b():
                                         target_address_b,
                                     )
 
+                maps_comparison_url_b = build_google_maps_directions_url(
+                    start_address_b,
+                    target_address_b,
+                )
+                if maps_comparison_url_b:
+                    st.link_button(
+                        "Google Maps ↗",
+                        maps_comparison_url_b,
+                        width="content",
+                    )
+
             b_ors_feedback = st.session_state.get("b_ors_feedback")
             if b_ors_feedback:
                 if b_ors_feedback["state"] == "success":
@@ -1495,7 +1518,7 @@ def show_case_b():
                     with feedback_placeholder.container():
                         st.error(b_ors_feedback["message"])
                         maps_url = b_ors_feedback.get("maps_url")
-                        if maps_url:
+                        if maps_url and not maps_comparison_url_b:
                             st.link_button("Route in Google Maps öffnen", maps_url)
 
         col1, col2, col3 = st.columns([1, 1.4, 1])
