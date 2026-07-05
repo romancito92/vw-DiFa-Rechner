@@ -5,7 +5,9 @@ import ors_helpers
 from location_candidates import (
     LocationCandidate,
     LocationResolutionError,
+    build_route_segment_label,
     extract_german_postal_code,
+    get_location_display_name,
     get_de_postal_code_candidates,
     has_concrete_street_address,
 )
@@ -23,6 +25,8 @@ class DummyResponse:
 
 
 def run_tests():
+    import direktfahrt_rechner
+
     assert extract_german_postal_code("50825 Köln") == "50825"
     assert extract_german_postal_code("51105 Köln") == "51105"
     assert extract_german_postal_code("Köln") == ""
@@ -38,6 +42,48 @@ def run_tests():
     assert west_candidates[0].coordinates == (6.9103, 50.9541)
     assert west_candidates[0].coordinates != (50.9541, 6.9103)
     assert siegen_candidates[0].coordinates == (8.0104, 50.8734)
+    assert get_location_display_name(siegen_candidates[0]) == "Siegen"
+    assert get_location_display_name("Heeserstraße 5, 57072 Siegen") == "Siegen"
+    assert build_route_segment_label(
+        "Start",
+        siegen_candidates[0],
+        "Ziel",
+        LocationCandidate.manual("20095 Hamburg, DE"),
+    ) == "Start (Siegen) → Ziel (Hamburg)"
+
+    hamburg_candidate = LocationCandidate(
+        label="20095 Hamburg, DE",
+        display_label="20095 Hamburg, DE",
+        query="20095 Hamburg",
+        postal_code="20095",
+        locality="Hamburg",
+        country_code="DE",
+        coordinates=(10.0014, 53.5544),
+        source="de_postal_code_centroid",
+    )
+    original_route_helper = direktfahrt_rechner.get_ors_distance_and_duration_robust
+    route_calls = []
+
+    def fake_route_helper(start, target, api_key, profile):
+        route_calls.append((start, target))
+        return (6.4, 10.0) if len(route_calls) == 1 else (436.3, 234.0)
+
+    try:
+        direktfahrt_rechner.get_ors_distance_and_duration_robust = fake_route_helper
+        _, _, route_segments = direktfahrt_rechner.fetch_case_a_ors_totals(
+            siegen_candidates[0],
+            hamburg_candidate,
+            "demo-key",
+            "driving-car",
+            True,
+        )
+    finally:
+        direktfahrt_rechner.get_ors_distance_and_duration_robust = original_route_helper
+
+    assert [segment["label"] for segment in route_segments] == [
+        "Hauptstandort (Siegen) → Start (Siegen)",
+        "Start (Siegen) → Ziel (Hamburg)",
+    ]
     assert west_candidates[0].source == "de_postal_code_centroid"
     assert get_de_postal_code_candidates("50825 Koeln")[0].display_label == "50825 Köln, DE"
     assert get_de_postal_code_candidates("50825 Cologne")[0].display_label == "50825 Köln, DE"

@@ -26,7 +26,11 @@ from config import (
     get_tankerkoenig_api_key,
 )
 from logging_helpers import configure_app_logger
-from location_candidates import LocationCandidate, LocationResolutionError
+from location_candidates import (
+    LocationCandidate,
+    LocationResolutionError,
+    build_route_segment_label,
+)
 from ors_helpers import (
     build_google_maps_directions_url,
     build_ors_failure_feedback,
@@ -313,7 +317,12 @@ def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, inc
         )
         route_segments.append(
             {
-                "label": "Hauptstandort -> Startadresse",
+                "label": build_route_segment_label(
+                    "Hauptstandort",
+                    A_MAIN_SITE_ADDRESS,
+                    "Start",
+                    start_address,
+                ),
                 "distance_km": approach_km,
                 "duration_minutes": approach_minutes,
             }
@@ -327,7 +336,12 @@ def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, inc
     )
     route_segments.append(
         {
-            "label": "Startadresse -> Zieladresse",
+            "label": build_route_segment_label(
+                "Start",
+                start_address,
+                "Ziel",
+                target_address,
+            ),
             "distance_km": trip_km,
             "duration_minutes": trip_minutes,
         }

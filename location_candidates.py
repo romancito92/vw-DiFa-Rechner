@@ -73,6 +73,31 @@ def extract_german_postal_code(search_text):
     return match.group(1) if match else ""
 
 
+def get_location_display_name(location):
+    """Return the selected locality, with a conservative fallback for manual inputs."""
+    if isinstance(location, LocationCandidate) and location.locality:
+        return location.locality.strip()
+    if isinstance(location, LocationCandidate):
+        raw_value = location.display_label or location.label or location.query
+    else:
+        raw_value = str(location or "")
+    parts = [part.strip() for part in raw_value.split(",") if part.strip()]
+    if not parts:
+        return ""
+    if len(parts) > 1 and re.fullmatch(r"[A-Za-z]{2,3}", parts[-1]):
+        parts.pop()
+    place_name = parts[-1] if parts else ""
+    return GERMAN_POSTAL_CODE_PATTERN.sub("", place_name).strip()
+
+
+def build_route_segment_label(start_role, start_location, target_role, target_location):
+    start_name = get_location_display_name(start_location)
+    target_name = get_location_display_name(target_location)
+    start_label = f"{start_role} ({start_name})" if start_name else start_role
+    target_label = f"{target_role} ({target_name})" if target_name else target_role
+    return f"{start_label} → {target_label}"
+
+
 def _has_explicit_foreign_country(search_text):
     match = EXPLICIT_COUNTRY_PATTERN.search(str(search_text or "").strip())
     if not match:
