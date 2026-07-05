@@ -26,10 +26,10 @@ from config import (
     get_tankerkoenig_api_key,
 )
 from logging_helpers import configure_app_logger
+from location_candidates import LocationCandidate, LocationResolutionError
 from ors_helpers import (
     build_ors_failure_feedback,
-    get_ors_address_suggestions,
-    get_ors_distance_and_duration,
+    get_location_candidates,
     get_ors_distance_and_duration_robust,
 )
 from tankerkoenig_helpers import get_nearby_diesel_price
@@ -340,18 +340,30 @@ def fetch_case_a_ors_totals(start_address, target_address, api_key, profile, inc
 
 
 def address_input_with_autofill(label, query_key, api_key):
-    """Ein Eingabefeld + klickbare Vorschläge darunter."""
+    """Render one shared A/B input and preserve the selected coordinate candidate."""
     pending_key = f"{query_key}__pending"
+    candidate_key = f"{query_key}__candidate"
     if pending_key in st.session_state:
-        st.session_state[query_key] = st.session_state[pending_key]
+        pending_candidate = LocationCandidate.from_dict(st.session_state[pending_key])
+        if pending_candidate is not None:
+            st.session_state[query_key] = pending_candidate.display_label
+            st.session_state[candidate_key] = pending_candidate.to_dict()
         del st.session_state[pending_key]
 
     query = st.text_input(label, key=query_key)
     selected = query.strip()
+    selected_candidate = LocationCandidate.from_dict(st.session_state.get(candidate_key))
+    if selected_candidate and selected != selected_candidate.display_label:
+        st.session_state.pop(candidate_key, None)
+        selected_candidate = None
 
-    if api_key and len(selected) >= 3:
+    lookup_error = ""
+    if len(selected) >= 3:
         try:
-            suggestions = get_ors_address_suggestions(selected, api_key)
+            suggestions = get_location_candidates(selected, api_key)
+        except LocationResolutionError as exc:
+            suggestions = []
+            lookup_error = str(exc)
         except Exception:
             suggestions = []
 
@@ -360,14 +372,18 @@ def address_input_with_autofill(label, query_key, api_key):
             shown = suggestions[:4]
             for i, suggestion in enumerate(shown):
                 if st.button(
-                    suggestion,
+                    suggestion.display_label,
                     key=f"{query_key}_sugg_{i}",
                     width="stretch",
                 ):
-                    st.session_state[pending_key] = suggestion
+                    st.session_state[pending_key] = suggestion.to_dict()
                     st.rerun()
+    if lookup_error:
+        st.info(lookup_error)
+    if selected_candidate and selected_candidate.warning:
+        st.warning(selected_candidate.warning)
 
-    return st.session_state.get(query_key, selected).strip()
+    return selected_candidate or LocationCandidate.manual(selected)
 
 
 
@@ -1448,7 +1464,7 @@ def show_case_b():
                         with feedback_placeholder.container():
                             with st.spinner("ORS-Daten werden gerade abgerufen …"):
                                 try:
-                                    distance_km_b, duration_minutes_b = get_ors_distance_and_duration(
+                                    distance_km_b, duration_minutes_b = get_ors_distance_and_duration_robust(
                                         start_address_b,
                                         target_address_b,
                                         api_key_b,
@@ -1463,10 +1479,11 @@ def show_case_b():
                                         "values": f"{distance_km_b:.0f} km | {format_duration_compact(duration_minutes_b)}",
                                     }
                                 except Exception as exc:
-                                    st.session_state["b_ors_feedback"] = {
-                                        "state": "error",
-                                        "message": f"ORS-Fehler: {exc}",
-                                    }
+                                    st.session_state["b_ors_feedback"] = build_ors_failure_feedback(
+                                        exc,
+                                        start_address_b,
+                                        target_address_b,
+                                    )
 
             b_ors_feedback = st.session_state.get("b_ors_feedback")
             if b_ors_feedback:
@@ -1475,7 +1492,11 @@ def show_case_b():
                         f"Daten übernommen: {b_ors_feedback['values']}",
                     )
                 elif b_ors_feedback["state"] == "error":
-                    feedback_placeholder.error(b_ors_feedback["message"])
+                    with feedback_placeholder.container():
+                        st.error(b_ors_feedback["message"])
+                        maps_url = b_ors_feedback.get("maps_url")
+                        if maps_url:
+                            st.link_button("Route in Google Maps öffnen", maps_url)
 
         col1, col2, col3 = st.columns([1, 1.4, 1])
         with col1:

@@ -56,10 +56,6 @@ def run_tests():
         "country_a": "DE",
     }
     assert _format_address_suggestion(german_city_without_postcode) == "Freudenberg, DE"
-    assert _format_address_suggestion(
-        german_city_without_postcode,
-        fallback_postal_code="57258",
-    ) == "57258 Freudenberg, DE"
     assert _extract_german_postal_code("57072 Siegen") == "57072"
     assert _extract_german_postal_code("Siegen") == ""
 
@@ -72,10 +68,6 @@ def run_tests():
         "country_a": "CH",
     }
     assert _format_address_suggestion(foreign_props) == "Bahnhofstrasse 1, 8001 Zürich, CH"
-    assert _format_address_suggestion(
-        foreign_props,
-        fallback_postal_code="57072",
-    ) == "Bahnhofstrasse 1, 8001 Zürich, CH"
 
     german_three_letter_code = {
         "name": "Siegen",
@@ -83,10 +75,7 @@ def run_tests():
         "country": "Germany",
         "country_a": "DEU",
     }
-    assert _format_address_suggestion(
-        german_three_letter_code,
-        fallback_postal_code="57072",
-    ) == "57072 Siegen, DE"
+    assert _format_address_suggestion(german_three_letter_code) == "Siegen, DE"
     assert _to_iso2_country_code("DEU") == "DE"
     assert _to_iso2_country_code("AUT") == "AT"
     assert _to_iso2_country_code("AUS") == "AU"
@@ -143,22 +132,27 @@ def run_tests():
             {
                 "features": [
                     {
+                        "geometry": {"coordinates": [8.0104, 50.8734]},
                         "properties": {
                             "name": "Siegen",
+                            "postalcode": "57072",
                             "locality": "Siegen",
                             "country": "Germany",
                             "country_a": "DEU",
                         }
                     },
                     {
+                        "geometry": {"coordinates": [-80.0, 35.0]},
                         "properties": {
                             "name": "Siegen",
+                            "postalcode": "12345",
                             "locality": "Siegen",
                             "country": "United States",
                             "country_a": "USA",
                         }
                     },
                     {
+                        "geometry": {"coordinates": [7.882, 50.9]},
                         "properties": {
                             "name": "Freudenberg",
                             "postalcode": "57258",
@@ -173,15 +167,20 @@ def run_tests():
 
     try:
         ors_helpers.requests.get = fake_suggestion_get
+        ors_helpers.get_location_candidates.clear()
         ors_helpers.get_ors_address_suggestions.clear()
-        suggestions = ors_helpers.get_ors_address_suggestions("57072 Siegen", "demo-key")
+        suggestions = ors_helpers.get_ors_address_suggestions(
+            "Teststraße 1, 57072 Siegen",
+            "demo-key",
+        )
     finally:
         ors_helpers.requests.get = original_get
+        ors_helpers.get_location_candidates.clear()
         ors_helpers.get_ors_address_suggestions.clear()
 
     assert suggestions == [
         "57072 Siegen, DE",
-        "Siegen, US",
+        "12345 Siegen, US",
         "57258 Freudenberg, DE",
     ]
 
@@ -247,6 +246,7 @@ def run_tests():
 
     try:
         ors_helpers.requests.get = fake_enriched_suggestion_get
+        ors_helpers.get_location_candidates.clear()
         ors_helpers.get_ors_address_suggestions.clear()
         _reverse_lookup_postal_code.clear()
         assert ors_helpers.get_ors_address_suggestions("Niederwerth", "demo-key") == [
@@ -254,6 +254,7 @@ def run_tests():
         ]
     finally:
         ors_helpers.requests.get = original_get
+        ors_helpers.get_location_candidates.clear()
         ors_helpers.get_ors_address_suggestions.clear()
         _reverse_lookup_postal_code.clear()
 

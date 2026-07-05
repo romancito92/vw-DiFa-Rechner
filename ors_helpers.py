@@ -7,6 +7,12 @@ import requests
 import streamlit as st
 
 from config import ORS_DIRECTIONS_URL_TEMPLATE, ORS_GEOCODE_URL, ORS_REVERSE_GEOCODE_URL
+from location_candidates import (
+    LocationCandidate,
+    LocationResolutionError,
+    extract_german_postal_code,
+    get_de_postal_code_candidates,
+)
 
 
 ORS_GEOCODE_LANGUAGE = "de"
@@ -17,7 +23,6 @@ ORS_FALLBACK_USER_MESSAGE = (
     "ORS-Abruf fehlgeschlagen. Bitte Adresse prüfen oder Route in Google Maps öffnen."
 )
 GERMAN_COUNTRY_CODES = {"DE", "DEU"}
-GERMAN_POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)(\d{5})(?!\d)")
 
 GERMAN_CITY_TRANSLATIONS = {
     "Cologne": "Köln",
@@ -70,15 +75,16 @@ def _build_geocode_params(search_text, api_key, size):
 
 def geocode_with_ors(address, api_key):
     """Liefert [lon, lat] für eine Adresse via ORS Geocoder."""
-    candidates = geocode_candidates_with_ors(address, api_key, size=1)
-    return candidates[0]["coordinates"]
+    candidates = _routing_candidates(address, api_key, size=1)
+    return list(candidates[0].coordinates)
 
 
 def geocode_candidates_with_ors(address, api_key, size=ORS_GEOCODE_CANDIDATE_LIMIT):
     """Liefert mehrere ORS-Geocoding-Kandidaten inkl. Label und Koordinaten."""
+    query = _location_query(address)
     response = requests.get(
         ORS_GEOCODE_URL,
-        params=_build_geocode_params(address, api_key, size),
+        params=_build_geocode_params(query, api_key, size),
         timeout=20,
     )
     if not response.ok:
@@ -86,7 +92,7 @@ def geocode_candidates_with_ors(address, api_key, size=ORS_GEOCODE_CANDIDATE_LIM
     data = response.json()
     features = data.get("features", [])
     if not features:
-        raise ValueError(f"Adresse nicht gefunden: {address}")
+        raise ValueError(f"Adresse nicht gefunden: {query}")
     candidates = []
     seen = set()
     for feature in features:
@@ -95,28 +101,23 @@ def geocode_candidates_with_ors(address, api_key, size=ORS_GEOCODE_CANDIDATE_LIM
         if not coordinates or len(coordinates) < 2:
             continue
         props = feature.get("properties", {})
-        label = (
-            _format_address_suggestion(
-                props,
-                fallback_postal_code=_extract_german_postal_code(address),
-            )
-            or props.get("label")
-            or address
+        candidate = _build_ors_candidate(
+            query,
+            props,
+            coordinates,
         )
-        key = (round(float(coordinates[0]), 6), round(float(coordinates[1]), 6), label)
+        key = (
+            round(float(coordinates[0]), 6),
+            round(float(coordinates[1]), 6),
+            candidate.display_label,
+        )
         if key in seen:
             continue
         seen.add(key)
-        candidates.append(
-            {
-                "coordinates": coordinates,
-                "label": label,
-                "properties": props,
-            }
-        )
+        candidates.append(candidate)
     if not candidates:
-        raise ValueError(f"Adresse nicht gefunden: {address}")
-    return candidates
+        raise ValueError(f"Adresse nicht gefunden: {query}")
+    return _sort_candidates_for_postal_code(candidates, extract_german_postal_code(query))
 
 
 def _join_non_empty(parts, separator=", "):
@@ -160,23 +161,16 @@ def _looks_like_same_place(first, second):
 
 
 def _extract_german_postal_code(search_text):
-    match = GERMAN_POSTAL_CODE_PATTERN.search(str(search_text or ""))
-    return match.group(1) if match else ""
+    return extract_german_postal_code(search_text)
 
 
-def _format_address_suggestion(props, fallback_postal_code=""):
+def _format_address_suggestion(props):
     name = props.get("name") or ""
     street = props.get("street") or ""
     house_number = props.get("housenumber") or ""
     postal_code = props.get("postalcode") or props.get("postal_code") or ""
     country_code = (props.get("country_a") or "").upper()
     country_name = (props.get("country") or "").strip()
-    is_german_result = (
-        country_code in GERMAN_COUNTRY_CODES
-        or country_name.casefold() in {"germany", "deutschland"}
-    )
-    if not postal_code and fallback_postal_code and is_german_result:
-        postal_code = fallback_postal_code
     locality = (
         props.get("locality")
         or props.get("borough")
@@ -199,6 +193,76 @@ def _format_address_suggestion(props, fallback_postal_code=""):
     city_line = _join_non_empty([postal_code, locality], separator=" ")
 
     return _join_non_empty([street_line, city_line, country])
+
+
+def _location_query(location):
+    if isinstance(location, LocationCandidate):
+        return (location.query or location.display_label or location.label).strip()
+    return str(location or "").strip()
+
+
+def _location_label(location):
+    if isinstance(location, LocationCandidate):
+        return (location.display_label or location.label or location.query).strip()
+    return str(location or "").strip()
+
+
+def _build_ors_candidate(query, props, coordinates):
+    postal_code = str(props.get("postalcode") or props.get("postal_code") or "").strip()
+    country_code = _to_iso2_country_code(props.get("country_a") or "")
+    locality = str(
+        props.get("locality")
+        or props.get("borough")
+        or props.get("municipality")
+        or props.get("localadmin")
+        or props.get("county")
+        or props.get("name")
+        or ""
+    ).strip()
+    label = _format_address_suggestion(props) or props.get("label") or query
+    query_postal_code = extract_german_postal_code(query)
+    warning = ""
+    match_type = str(props.get("match_type") or "")
+    if query_postal_code:
+        if postal_code == query_postal_code:
+            match_type = "postal_match"
+        elif postal_code:
+            match_type = "postal_mismatch"
+            warning = (
+                f"Die eingegebene PLZ {query_postal_code} stimmt nicht mit der von ORS "
+                f"gefundenen PLZ {postal_code} überein."
+            )
+        else:
+            match_type = "postal_unconfirmed"
+            warning = (
+                f"ORS konnte die eingegebene PLZ {query_postal_code} für diesen Treffer "
+                "nicht bestätigen."
+            )
+    confidence = props.get("confidence")
+    try:
+        confidence = float(confidence) if confidence is not None else None
+    except (TypeError, ValueError):
+        confidence = None
+    return LocationCandidate(
+        label=label,
+        display_label=label,
+        query=query,
+        postal_code=postal_code,
+        locality=locality,
+        country_code=country_code,
+        coordinates=(float(coordinates[0]), float(coordinates[1])),
+        source="ors_geocode",
+        confidence=confidence,
+        match_type=match_type,
+        warning=warning,
+    )
+
+
+def _sort_candidates_for_postal_code(candidates, query_postal_code):
+    if not query_postal_code:
+        return candidates
+    priority = {"postal_match": 0, "postal_unconfirmed": 1, "postal_mismatch": 2}
+    return sorted(candidates, key=lambda candidate: priority.get(candidate.match_type, 1))
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
@@ -231,9 +295,14 @@ def _reverse_lookup_postal_code(longitude, latitude, api_key, country_code=""):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_ors_address_suggestions(query, api_key):
-    """Liefert bis zu 5 Adressvorschläge für Autocomplete."""
+def get_location_candidates(query, api_key):
+    """Return coordinate-bearing local postal or ORS candidates for one query."""
     if not query or len(query.strip()) < 3:
+        return []
+    local_candidates = get_de_postal_code_candidates(query)
+    if local_candidates is not None:
+        return local_candidates
+    if not api_key:
         return []
     response = requests.get(
         ORS_GEOCODE_URL,
@@ -244,48 +313,90 @@ def get_ors_address_suggestions(query, api_key):
         _raise_ors_error(response)
     data = response.json()
     features = data.get("features", [])
-    suggestions = []
-    fallback_postal_code = _extract_german_postal_code(query)
+    candidates = []
     for feature in features:
         props = feature.get("properties", {})
         postal_code = props.get("postalcode") or props.get("postal_code")
-        country_code = str(props.get("country_a") or "").upper()
-        country_name = str(props.get("country") or "").strip().casefold()
-        uses_query_postal_code = bool(fallback_postal_code) and (
-            country_code in GERMAN_COUNTRY_CODES
-            or country_name in {"germany", "deutschland"}
-        )
         formatted_props = props
-        if not postal_code and not uses_query_postal_code:
-            coordinates = feature.get("geometry", {}).get("coordinates") or []
-            if len(coordinates) >= 2:
-                try:
-                    reverse_postal_code = _reverse_lookup_postal_code(
-                        coordinates[0],
-                        coordinates[1],
-                        api_key,
-                        props.get("country_a") or "",
-                    )
-                    if reverse_postal_code:
-                        formatted_props = {**props, "postalcode": reverse_postal_code}
-                except Exception:
-                    pass
-        label = (
-            _format_address_suggestion(
-                formatted_props,
-                fallback_postal_code=fallback_postal_code,
-            )
-            or props.get("label")
-        )
-        if label:
-            suggestions.append(label)
+        coordinates = feature.get("geometry", {}).get("coordinates") or []
+        if len(coordinates) < 2:
+            continue
+        if not postal_code:
+            try:
+                reverse_postal_code = _reverse_lookup_postal_code(
+                    coordinates[0],
+                    coordinates[1],
+                    api_key,
+                    props.get("country_a") or "",
+                )
+                if reverse_postal_code:
+                    formatted_props = {**props, "postalcode": reverse_postal_code}
+            except Exception:
+                pass
+        candidates.append(_build_ors_candidate(query, formatted_props, coordinates))
     seen = set()
     deduped = []
-    for item in suggestions:
-        if item not in seen:
-            deduped.append(item)
-            seen.add(item)
+    for candidate in _sort_candidates_for_postal_code(
+        candidates,
+        extract_german_postal_code(query),
+    ):
+        key = (candidate.display_label, candidate.coordinates)
+        if key not in seen:
+            deduped.append(candidate)
+            seen.add(key)
     return deduped
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_ors_address_suggestions(query, api_key):
+    """Backward-compatible string labels; new UI code uses get_location_candidates."""
+    return [candidate.display_label for candidate in get_location_candidates(query, api_key)]
+
+
+def resolve_location_candidate(location, api_key):
+    """Resolve manual input once; preserve already selected coordinates unchanged."""
+    if isinstance(location, LocationCandidate) and location.has_coordinates:
+        return location
+    query = _location_query(location)
+    if not query:
+        raise LocationResolutionError("Bitte eine Adresse oder einen Ort eingeben.")
+    local_candidates = get_de_postal_code_candidates(query)
+    if local_candidates is not None:
+        return local_candidates[0]
+    candidates = geocode_candidates_with_ors(query, api_key)
+    if not candidates:
+        raise LocationResolutionError(f"Adresse nicht gefunden: {query}")
+    return _validated_manual_routing_candidates(query, candidates)[0]
+
+
+def _validated_manual_routing_candidates(query, candidates):
+    query_postal_code = extract_german_postal_code(query)
+    if not query_postal_code:
+        return candidates
+    matching_candidates = [
+        candidate for candidate in candidates if candidate.match_type == "postal_match"
+    ]
+    if matching_candidates:
+        return matching_candidates
+    warning = candidates[0].warning if candidates else ""
+    raise LocationResolutionError(
+        warning
+        or (
+            f"ORS konnte die eingegebene PLZ {query_postal_code} nicht bestätigen. "
+            "Bitte vollständige Adresse prüfen."
+        )
+    )
+
+
+def _routing_candidates(location, api_key, size=ORS_GEOCODE_CANDIDATE_LIMIT):
+    if isinstance(location, LocationCandidate) and location.has_coordinates:
+        return [location]
+    query = _location_query(location)
+    local_candidates = get_de_postal_code_candidates(query)
+    if local_candidates is not None:
+        return local_candidates
+    candidates = geocode_candidates_with_ors(query, api_key, size=size)
+    return _validated_manual_routing_candidates(query, candidates)
 
 
 def _fetch_ors_route_summary(start_coords, target_coords, api_key, profile, radiuses=None):
@@ -357,15 +468,15 @@ def _build_routing_attempts(start_candidates, target_candidates):
 
 def get_ors_distance_and_duration_robust(start_address, target_address, api_key, profile):
     """Berechnet ORS-Daten mit wenigen, nachvollziehbaren Snapping-/Kandidaten-Retries."""
-    start_candidates = geocode_candidates_with_ors(start_address, api_key)
-    target_candidates = geocode_candidates_with_ors(target_address, api_key)
+    start_candidates = _routing_candidates(start_address, api_key)
+    target_candidates = _routing_candidates(target_address, api_key)
     last_error = None
 
     for attempt in _build_routing_attempts(start_candidates, target_candidates):
         try:
             return _fetch_ors_route_summary(
-                attempt["start"]["coordinates"],
-                attempt["target"]["coordinates"],
+                list(attempt["start"].coordinates),
+                list(attempt["target"].coordinates),
                 api_key,
                 profile,
                 radiuses=attempt["radiuses"],
@@ -380,8 +491,8 @@ def get_ors_distance_and_duration_robust(start_address, target_address, api_key,
 
 def build_google_maps_directions_url(start_address, target_address):
     """Erzeugt einen Google-Maps-Fallback-Link ohne API-Key."""
-    start = (start_address or "").strip()
-    target = (target_address or "").strip()
+    start = _location_label(start_address)
+    target = _location_label(target_address)
     if not start or not target:
         return None
     return "https://www.google.com/maps/dir/?" + urlencode(
