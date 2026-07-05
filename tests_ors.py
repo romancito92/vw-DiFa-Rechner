@@ -5,6 +5,7 @@ from ors_helpers import (
     ORS_FALLBACK_USER_MESSAGE,
     ORSError,
     _build_geocode_params,
+    _extract_german_postal_code,
     _format_address_suggestion,
     build_google_maps_directions_url,
     build_ors_failure_feedback,
@@ -35,7 +36,7 @@ def run_tests():
         "country": "Germany",
         "country_a": "DE",
     }
-    assert _format_address_suggestion(german_props) == "Helmholtzstraße 63, 50825 Köln, Deutschland"
+    assert _format_address_suggestion(german_props) == "Helmholtzstraße 63, 50825 Köln, DE"
 
     german_city_props = {
         "name": "Freudenberg",
@@ -44,7 +45,7 @@ def run_tests():
         "country": "Germany",
         "country_a": "DE",
     }
-    assert _format_address_suggestion(german_city_props) == "57258 Freudenberg, Deutschland"
+    assert _format_address_suggestion(german_city_props) == "57258 Freudenberg, DE"
 
     german_city_without_postcode = {
         "name": "Freudenberg",
@@ -52,7 +53,13 @@ def run_tests():
         "country": "Germany",
         "country_a": "DE",
     }
-    assert _format_address_suggestion(german_city_without_postcode) == "Freudenberg, Deutschland"
+    assert _format_address_suggestion(german_city_without_postcode) == "Freudenberg, DE"
+    assert _format_address_suggestion(
+        german_city_without_postcode,
+        fallback_postal_code="57258",
+    ) == "57258 Freudenberg, DE"
+    assert _extract_german_postal_code("57072 Siegen") == "57072"
+    assert _extract_german_postal_code("Siegen") == ""
 
     foreign_props = {
         "street": "Bahnhofstrasse",
@@ -62,7 +69,22 @@ def run_tests():
         "country": "Switzerland",
         "country_a": "CH",
     }
-    assert _format_address_suggestion(foreign_props) == "Bahnhofstrasse 1, 8001 Zürich, Schweiz"
+    assert _format_address_suggestion(foreign_props) == "Bahnhofstrasse 1, 8001 Zürich, CH"
+    assert _format_address_suggestion(
+        foreign_props,
+        fallback_postal_code="57072",
+    ) == "Bahnhofstrasse 1, 8001 Zürich, CH"
+
+    german_three_letter_code = {
+        "name": "Siegen",
+        "locality": "Siegen",
+        "country": "Germany",
+        "country_a": "DEU",
+    }
+    assert _format_address_suggestion(
+        german_three_letter_code,
+        fallback_postal_code="57072",
+    ) == "57072 Siegen, DEU"
 
     maps_url = build_google_maps_directions_url(
         "Heeserstraße 5, 57072 Siegen",
@@ -107,6 +129,54 @@ def run_tests():
     original_get = ors_helpers.requests.get
     original_post = ors_helpers.requests.post
     post_payloads = []
+
+    def fake_suggestion_get(url, params, timeout):
+        return DummyResponse(
+            True,
+            {
+                "features": [
+                    {
+                        "properties": {
+                            "name": "Siegen",
+                            "locality": "Siegen",
+                            "country": "Germany",
+                            "country_a": "DEU",
+                        }
+                    },
+                    {
+                        "properties": {
+                            "name": "Siegen",
+                            "locality": "Siegen",
+                            "country": "United States",
+                            "country_a": "USA",
+                        }
+                    },
+                    {
+                        "properties": {
+                            "name": "Freudenberg",
+                            "postalcode": "57258",
+                            "locality": "Freudenberg",
+                            "country": "Germany",
+                            "country_a": "DEU",
+                        }
+                    },
+                ]
+            },
+        )
+
+    try:
+        ors_helpers.requests.get = fake_suggestion_get
+        ors_helpers.get_ors_address_suggestions.clear()
+        suggestions = ors_helpers.get_ors_address_suggestions("57072 Siegen", "demo-key")
+    finally:
+        ors_helpers.requests.get = original_get
+        ors_helpers.get_ors_address_suggestions.clear()
+
+    assert suggestions == [
+        "57072 Siegen, DEU",
+        "Siegen, USA",
+        "57258 Freudenberg, DEU",
+    ]
 
     def fake_get(url, params, timeout):
         return DummyResponse(

@@ -90,7 +90,7 @@ def determine_pickup_area(cfg, pickup_postal_code):
 
 
 def evaluate_shipment_eligibility(cfg, country_code, pieces, is_pallet, is_non_parcel):
-    """Globale Pruefung für Modus C (unabhaengig vom Carrier)."""
+    """Globale Prüfung für Modus C (unabhängig vom Carrier)."""
     rules = cfg["validation_rules"]
     blocking = []
     warnings = []
@@ -181,7 +181,7 @@ def calculate_insurance_fee(cfg, declared_goods_value_eur):
         rate_per_mille = float(logic["rate_per_mille_of_declared_value"])
         return declared_goods_value_eur * (rate_per_mille / 1000.0)
 
-    # Fallback fuer alte Konfigurationen.
+    # Fallback für alte Konfigurationen.
     if "rate_pct_over_included" in logic:
         over_value = declared_goods_value_eur - included
         fee = over_value * (float(logic["rate_pct_over_included"]) / 100.0)
@@ -299,7 +299,7 @@ def calculate_case_c_tariff(
         if is_late_registration:
             reg_fees = late_rules.get("late_registration_fee_by_area_eur", {})
             late_fee = float(reg_fees.get(area, late_fee))
-            late_cfg = {"label": f"Spaetanmeldung Gebiet {area}", "price_eur": late_fee}
+            late_cfg = {"label": f"Spätanmeldung Gebiet {area}", "price_eur": late_fee}
 
         for row in late_rules.get("time_window_fees", []):
             if row["label"] == window_label:
@@ -319,7 +319,7 @@ def calculate_case_c_tariff(
                 late_pickup_fee
                 - float(late_rules.get("self_dropoff_after_19_discount_area_a_eur", 0.0)),
             )
-        late_pickup_label = f"Spaetabholung Gebiet {area} ({window_label})"
+        late_pickup_label = f"Spätabholung Gebiet {area} ({window_label})"
 
         if not is_late_pickup:
             late_pickup_fee = 0.0

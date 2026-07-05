@@ -15,6 +15,8 @@ ORS_MAX_ROUTING_ATTEMPTS = 6
 ORS_FALLBACK_USER_MESSAGE = (
     "ORS-Abruf fehlgeschlagen. Bitte Adresse prüfen oder Route in Google Maps öffnen."
 )
+GERMAN_COUNTRY_CODES = {"DE", "DEU"}
+GERMAN_POSTAL_CODE_PATTERN = re.compile(r"(?<!\d)(\d{5})(?!\d)")
 
 GERMAN_CITY_TRANSLATIONS = {
     "Cologne": "Köln",
@@ -88,7 +90,14 @@ def geocode_candidates_with_ors(address, api_key, size=ORS_GEOCODE_CANDIDATE_LIM
         if not coordinates or len(coordinates) < 2:
             continue
         props = feature.get("properties", {})
-        label = _format_address_suggestion(props) or props.get("label") or address
+        label = (
+            _format_address_suggestion(
+                props,
+                fallback_postal_code=_extract_german_postal_code(address),
+            )
+            or props.get("label")
+            or address
+        )
         key = (round(float(coordinates[0]), 6), round(float(coordinates[1]), 6), label)
         if key in seen:
             continue
@@ -113,15 +122,15 @@ def _translate_locality_name(locality, country_code):
     cleaned_locality = (locality or "").strip()
     if not cleaned_locality:
         return ""
-    if country_code == "DE":
+    if country_code in GERMAN_COUNTRY_CODES:
         return GERMAN_CITY_TRANSLATIONS.get(cleaned_locality, cleaned_locality)
     return cleaned_locality
 
 
-def _translate_country_name(country, country_code):
+def _format_country(country, country_code):
+    if country_code:
+        return country_code
     cleaned_country = (country or "").strip()
-    if country_code == "DE":
-        return "Deutschland"
     if not cleaned_country:
         return ""
     return COUNTRY_TRANSLATIONS.get(cleaned_country, cleaned_country)
@@ -131,12 +140,24 @@ def _looks_like_same_place(first, second):
     return (first or "").strip().casefold() == (second or "").strip().casefold()
 
 
-def _format_address_suggestion(props):
+def _extract_german_postal_code(search_text):
+    match = GERMAN_POSTAL_CODE_PATTERN.search(str(search_text or ""))
+    return match.group(1) if match else ""
+
+
+def _format_address_suggestion(props, fallback_postal_code=""):
     name = props.get("name") or ""
     street = props.get("street") or ""
     house_number = props.get("housenumber") or ""
     postal_code = props.get("postalcode") or props.get("postal_code") or ""
     country_code = (props.get("country_a") or "").upper()
+    country_name = (props.get("country") or "").strip()
+    is_german_result = (
+        country_code in GERMAN_COUNTRY_CODES
+        or country_name.casefold() in {"germany", "deutschland"}
+    )
+    if not postal_code and fallback_postal_code and is_german_result:
+        postal_code = fallback_postal_code
     locality = (
         props.get("locality")
         or props.get("borough")
@@ -148,7 +169,7 @@ def _format_address_suggestion(props):
     if not locality and name and not street:
         locality = name
     locality = _translate_locality_name(locality, country_code)
-    country = _translate_country_name(props.get("country"), country_code)
+    country = _format_country(country_name, country_code)
 
     layer = props.get("layer") or ""
     if not street and name and not _looks_like_same_place(name, locality):
@@ -176,9 +197,16 @@ def get_ors_address_suggestions(query, api_key):
     data = response.json()
     features = data.get("features", [])
     suggestions = []
+    fallback_postal_code = _extract_german_postal_code(query)
     for feature in features:
         props = feature.get("properties", {})
-        label = _format_address_suggestion(props) or props.get("label")
+        label = (
+            _format_address_suggestion(
+                props,
+                fallback_postal_code=fallback_postal_code,
+            )
+            or props.get("label")
+        )
         if label:
             suggestions.append(label)
     seen = set()

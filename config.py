@@ -297,7 +297,7 @@ ORS_PROFILE_LABELS = {
     "driving-car": "PKW (driving-car)",
     "driving-hgv": "LKW (driving-hgv)",
     "cycling-regular": "Fahrrad (cycling-regular)",
-    "foot-walking": "Zu Fuss (foot-walking)",
+    "foot-walking": "Zu Fuß (foot-walking)",
 }
 
 VEHICLE_TO_ORS_PROFILE = {

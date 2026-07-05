@@ -81,9 +81,9 @@ def format_oidc_configuration_error(oidc_settings):
 
     missing_keys = ", ".join(oidc_settings.missing_fields)
     return (
-        "OIDC-Anmeldung ist noch nicht vollstaendig konfiguriert. "
-        "Bitte pruefen Sie die Streamlit-Secrets fuer Redirect URI, Cookie Secret, "
-        f"Client ID, Client Secret und Tenant-/Metadata-URL. Fehlende Eintraege: {missing_keys}"
+        "OIDC-Anmeldung ist noch nicht vollständig konfiguriert. "
+        "Bitte prüfen Sie die Streamlit-Secrets für Redirect URI, Cookie Secret, "
+        f"Client ID, Client Secret und Tenant-/Metadata-URL. Fehlende Einträge: {missing_keys}"
     )
 
 
@@ -94,7 +94,7 @@ def get_oidc_configuration_error():
 
 def render_access_denied():
     email = get_user_email()
-    st.error("Zugriff verweigert. Dieses Konto ist fuer die interne Preisrechner-App nicht freigeschaltet.")
+    st.error("Zugriff verweigert. Dieses Konto ist für die interne Preisrechner-App nicht freigeschaltet.")
     if email:
         st.caption(f"Angemeldetes Konto: {email}")
     if st.button("Abmelden", key="auth_logout_denied"):

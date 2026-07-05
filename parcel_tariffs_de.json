@@ -187,7 +187,7 @@
         { "max_weight_kg": 85.0, "price_eur": 188.0 },
         { "max_weight_kg": 90.0, "price_eur": 196.0 },
         { "max_weight_kg": 95.0, "price_eur": 208.0 },
-        { "max_weight_kg": 100.0, "price_eur": 226.0 }
+        { "max_weight_kg": 200.0, "price_eur": 226.0 }
       ],
       "service_surcharges": {
         "fuel_surcharge_pct": 0.0

@@ -94,12 +94,12 @@ def render_login_gate():
 
     if not is_logged_in():
         st.title("Versandwerk Preisrechner [intern]")
-        st.caption("Interne Anwendung fuer Preisfindung im Versand- und Transportkontext.")
+        st.caption("Interne Anwendung für Preisfindung im Versand- und Transportkontext.")
         st.info("Bitte mit Ihrem internen Versandwerk-Konto anmelden.")
         oidc_configuration_error = get_oidc_configuration_error()
         if oidc_configuration_error:
             st.error(oidc_configuration_error)
-            st.caption("Ohne vollstaendige OIDC-Secrets bleibt die App aus Sicherheitsgruenden gesperrt.")
+            st.caption("Ohne vollständige OIDC-Secrets bleibt die App aus Sicherheitsgründen gesperrt.")
             st.stop()
 
         if st.button(login_button_label(), key="auth_login_button", type="primary"):
@@ -240,7 +240,7 @@ def round_down_to_price_ending_9(value):
 
 
 def determine_case_d_base_markup(weight_class, length_class):
-    """Ermittelt die stufenbasierte EK+-Aufschlagsbasis fuer Modus D."""
+    """Ermittelt die stufenbasierte EK+-Aufschlagsbasis für Modus D."""
     if weight_class == "über 200 kg" or length_class == "ab 250 cm":
         return 150.0, "Schwer / lang"
     if weight_class == "100 bis 200 kg" and length_class == "unter 250 cm":
@@ -249,7 +249,7 @@ def determine_case_d_base_markup(weight_class, length_class):
 
 
 def get_case_d_ek_notice(ek_net):
-    """Gibt den operativen EK-Hinweis fuer Modus D zurueck."""
+    """Gibt den operativen EK-Hinweis für Modus D zurück."""
     ek_value = float(ek_net)
     if ek_value == 0.0:
         return "missing_ek"
@@ -259,7 +259,7 @@ def get_case_d_ek_notice(ek_net):
 
 
 def calculate_case_d_ek_plus(ek_net, product_type, weight_class, length_class, adjustment_label):
-    """Berechnet den pragmatischen EK+-Richtwert fuer Modus D."""
+    """Berechnet den pragmatischen EK+-Richtwert für Modus D."""
     product_surcharges = {
         "Stückgut Inland": 0.0,
         "Stückgut Ausland": 10.0,
@@ -412,7 +412,59 @@ def address_input_with_autofill(label, query_key, api_key):
 
 
 
+def append_c_piece_with_previous_values(session_state, previous_piece):
+    """Append a Mode C piece and seed it with the previous piece's values."""
+    next_id = int(session_state.get("c_piece_next_id", 1))
+    initial_values = dict(session_state.get("c_piece_initial_values", {}))
+    initial_values[next_id] = {
+        "weight_kg": float(previous_piece["weight_kg"]),
+        "length_cm": float(previous_piece["length_cm"]),
+        "width_cm": float(previous_piece["width_cm"]),
+        "height_cm": float(previous_piece["height_cm"]),
+    }
+    session_state["c_piece_initial_values"] = initial_values
+    session_state["c_piece_ids"] = [*session_state.get("c_piece_ids", []), next_id]
+    session_state["c_piece_next_id"] = next_id + 1
+    session_state["c_expanded_piece_id"] = next_id
+    return next_id
 
+
+def get_case_c_exp_deku_reasons(cfg, pieces, is_pallet):
+    """Return operational reasons that require EXP approval by the delivery DeKu station."""
+    reasons = []
+    if is_pallet:
+        reasons.append("palettierte Sendung")
+    if any(float(piece["length_cm"]) > 270.0 for piece in pieces):
+        reasons.append("Länge über 270 cm")
+    if any(get_piece_metrics(cfg, piece)["billable_weight"] > 50.0 for piece in pieces):
+        reasons.append("Abrechnungsgewicht über 50 kg")
+    return reasons
+
+
+def build_case_c_piece_rows(cfg, pieces):
+    """Build detail rows and a final totals row for the Mode C package table."""
+    rows = []
+    metrics_list = [get_piece_metrics(cfg, piece) for piece in pieces]
+    for idx, metrics in enumerate(metrics_list, start=1):
+        rows.append(
+            {
+                "Packstück": str(idx),
+                "Real kg": f"{metrics['real_weight']:.1f}",
+                "Volumen kg": f"{metrics['volume_weight']:.1f}",
+                "Abrechnung kg": f"{metrics['billable_weight']:.1f}",
+                "Gurtmaß cm": f"{metrics['girth_plus_length']:.1f}",
+            }
+        )
+    rows.append(
+        {
+            "Packstück": "Gesamt",
+            "Real kg": f"{sum(row['real_weight'] for row in metrics_list):.1f}",
+            "Volumen kg": f"{sum(row['volume_weight'] for row in metrics_list):.1f}",
+            "Abrechnung kg": f"{sum(row['billable_weight'] for row in metrics_list):.1f}",
+            "Gurtmaß cm": f"{sum(row['girth_plus_length'] for row in metrics_list):.1f}",
+        }
+    )
+    return rows
 
 
 def show_case_c():
@@ -487,14 +539,21 @@ def show_case_c():
         pieces = []
         piece_ids = list(st.session_state["c_piece_ids"])
         form_version = int(st.session_state.get("c_form_version", 0))
+        expanded_piece_id = st.session_state.pop("c_expanded_piece_id", None)
         for idx, piece_id in enumerate(piece_ids, start=1):
-            with st.expander(f"Packstück {idx}", expanded=(idx == 1)):
+            piece_initial_values = st.session_state.get("c_piece_initial_values", {}).get(
+                piece_id, {}
+            )
+            with st.expander(
+                f"Packstück {idx}",
+                expanded=(piece_id == expanded_piece_id or (idx == 1 and len(piece_ids) == 1)),
+            ):
                 p1, p2, p3, p4, p5 = st.columns([1, 1, 1, 1, 0.8])
                 with p1:
                     p_weight = st.number_input(
                         "Gewicht (kg)",
                         min_value=0.1,
-                        value=5.0,
+                        value=float(piece_initial_values.get("weight_kg", 5.0)),
                         step=0.1,
                         key=f"c_v{form_version}_piece_{piece_id}_weight",
                     )
@@ -502,7 +561,7 @@ def show_case_c():
                     p_length = st.number_input(
                         "Länge (cm)",
                         min_value=1.0,
-                        value=40.0,
+                        value=float(piece_initial_values.get("length_cm", 40.0)),
                         step=1.0,
                         key=f"c_v{form_version}_piece_{piece_id}_length",
                     )
@@ -510,7 +569,7 @@ def show_case_c():
                     p_width = st.number_input(
                         "Breite (cm)",
                         min_value=1.0,
-                        value=30.0,
+                        value=float(piece_initial_values.get("width_cm", 30.0)),
                         step=1.0,
                         key=f"c_v{form_version}_piece_{piece_id}_width",
                     )
@@ -518,7 +577,7 @@ def show_case_c():
                     p_height = st.number_input(
                         "Höhe (cm)",
                         min_value=1.0,
-                        value=20.0,
+                        value=float(piece_initial_values.get("height_cm", 20.0)),
                         step=1.0,
                         key=f"c_v{form_version}_piece_{piece_id}_height",
                     )
@@ -538,26 +597,13 @@ def show_case_c():
 
                 if idx == len(piece_ids):
                     if st.button("➕ Packstück hinzufügen", key=f"c_add_piece_after_{piece_id}"):
-                        next_id = int(st.session_state.get("c_piece_next_id", 1))
-                        st.session_state["c_piece_ids"].append(next_id)
-                        st.session_state["c_piece_next_id"] = next_id + 1
+                        append_c_piece_with_previous_values(st.session_state, pieces[-1])
                         st.rerun()
 
         st.caption("IATA-Formel: L x B x H (cm) / 5000 = Volumengewicht (kg)")
         st.caption("Gurtmaß: Länge + (2 x Breite) + (2 x Höhe)")
 
-        piece_rows = []
-        for idx, piece in enumerate(pieces, start=1):
-            metrics = get_piece_metrics(cfg, piece)
-            piece_rows.append(
-                {
-                    "Packstück": idx,
-                    "Real kg": f"{metrics['real_weight']:.1f}",
-                    "Volumen kg": f"{metrics['volume_weight']:.1f}",
-                    "Abrechnung kg": f"{metrics['billable_weight']:.1f}",
-                    "Gurtmaß cm": f"{metrics['girth_plus_length']:.1f}",
-                }
-            )
+        piece_rows = build_case_c_piece_rows(cfg, pieces)
         st.dataframe(piece_rows, width="stretch", hide_index=True)
 
     selected_services = []
@@ -739,20 +785,12 @@ def show_case_c():
             "Ausgewählter EXP-Terminservice (z. B. 8/9/10/12 Uhr oder Fixtermin) macht LZ48 unzulässig."
         )
 
-    needs_deku_check = False
-    deku_reasons = []
-    if is_pallet:
-        needs_deku_check = True
-        deku_reasons.append("palettierte Sendung")
-    if any(float(piece["length_cm"]) > 270.0 for piece in pieces):
-        needs_deku_check = True
-        deku_reasons.append("Länge über 270 cm")
-    if any(get_piece_metrics(cfg, piece)["billable_weight"] > 50.0 for piece in pieces):
-        needs_deku_check = True
-        deku_reasons.append("Abrechnungsgewicht über 50 kg")
+    deku_reasons = get_case_c_exp_deku_reasons(cfg, pieces, is_pallet)
+    needs_deku_check = bool(deku_reasons)
     if needs_deku_check:
         st.warning(
-            "Wichtiger Hinweis für Dispo: Vor Beauftragung bitte zwingend mit der DeKu-Station klären, "
+            "Wichtiger EXP-Hinweis für Dispo: Vor Beauftragung bitte zwingend mit der "
+            "ausliefernden DeKu-Station klären, "
             f"ob die Zustellung möglich ist ({', '.join(deku_reasons)})."
         )
     if island_service_selected:

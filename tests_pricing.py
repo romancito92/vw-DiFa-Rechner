@@ -319,6 +319,58 @@ def run_tests():
     # 24) D-Hinweislogik: ueber 500 EUR fordert 4-Augen-Abstimmung
     assert app.get_case_d_ek_notice(500.01) == "high_ek"
 
+    # 25) Ein neues C-Packstück übernimmt die Werte des vorherigen Packstücks.
+    c_piece_state = {"c_piece_ids": [0], "c_piece_next_id": 1}
+    previous_piece = piece(20, length=300, width=25, height=22)
+    new_piece_id = app.append_c_piece_with_previous_values(c_piece_state, previous_piece)
+    assert new_piece_id == 1
+    assert c_piece_state["c_piece_ids"] == [0, 1]
+    assert c_piece_state["c_piece_next_id"] == 2
+    assert c_piece_state["c_expanded_piece_id"] == 1
+    assert c_piece_state["c_piece_initial_values"][1] == previous_piece
+
+    # 26) EXP kann summierte Sendungsgewichte bis 200 kg tariflich abbilden.
+    exp_large_shipment = app.calculate_case_c_tariff(
+        cfg,
+        "EXP",
+        [piece(23.6)] + [piece(20, length=300, width=25, height=22) for _ in range(5)],
+        [],
+        "standard",
+        0.0,
+        [],
+        base_ctx(),
+        False,
+    )
+    assert exp_large_shipment is not None
+    assert round(
+        sum(row["billable_weight"] for row in exp_large_shipment["piece_metrics"]), 1
+    ) == 188.6
+    assert round(exp_large_shipment["base_total"], 2) == 226.00
+    assert round(exp_large_shipment["matched_bands"][0], 1) == 200.0
+
+    # 27) EXP verlangt bei Palette, >50 kg oder >270 cm die DeKu-Abstimmung.
+    assert app.get_case_c_exp_deku_reasons(cfg, [piece(50, length=270)], False) == []
+    assert app.get_case_c_exp_deku_reasons(cfg, [piece(20)], True) == [
+        "palettierte Sendung"
+    ]
+    assert app.get_case_c_exp_deku_reasons(cfg, [piece(50.1)], False) == [
+        "Abrechnungsgewicht über 50 kg"
+    ]
+    assert app.get_case_c_exp_deku_reasons(
+        cfg, [piece(20, length=270.1, width=10, height=10)], False
+    ) == ["Länge über 270 cm"]
+
+    # 28) Die C-Packstücktabelle endet mit den summierten Gesamtwerten.
+    piece_rows = app.build_case_c_piece_rows(cfg, [piece(99), piece(5), piece(5)])
+    assert [row["Packstück"] for row in piece_rows] == ["1", "2", "3", "Gesamt"]
+    assert piece_rows[-1] == {
+        "Packstück": "Gesamt",
+        "Real kg": "109.0",
+        "Volumen kg": "14.4",
+        "Abrechnung kg": "109.0",
+        "Gurtmaß cm": "420.0",
+    }
+
     print("OK: Alle Preislogik-Regressionstests bestanden.")
 
 
