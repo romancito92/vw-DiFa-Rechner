@@ -7,6 +7,7 @@ from ors_helpers import (
     _build_geocode_params,
     _extract_german_postal_code,
     _format_address_suggestion,
+    _to_iso2_country_code,
     build_google_maps_directions_url,
     build_ors_failure_feedback,
 )
@@ -84,7 +85,12 @@ def run_tests():
     assert _format_address_suggestion(
         german_three_letter_code,
         fallback_postal_code="57072",
-    ) == "57072 Siegen, DEU"
+    ) == "57072 Siegen, DE"
+    assert _to_iso2_country_code("DEU") == "DE"
+    assert _to_iso2_country_code("AUT") == "AT"
+    assert _to_iso2_country_code("AUS") == "AU"
+    assert _to_iso2_country_code("USA") == "US"
+    assert _to_iso2_country_code("CH") == "CH"
 
     maps_url = build_google_maps_directions_url(
         "Heeserstraße 5, 57072 Siegen",
@@ -173,9 +179,9 @@ def run_tests():
         ors_helpers.get_ors_address_suggestions.clear()
 
     assert suggestions == [
-        "57072 Siegen, DEU",
-        "Siegen, USA",
-        "57258 Freudenberg, DEU",
+        "57072 Siegen, DE",
+        "Siegen, US",
+        "57258 Freudenberg, DE",
     ]
 
     def fake_get(url, params, timeout):

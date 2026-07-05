@@ -2,6 +2,7 @@ import re
 from itertools import product
 from urllib.parse import urlencode
 
+import pycountry
 import requests
 import streamlit as st
 
@@ -28,6 +29,10 @@ COUNTRY_TRANSLATIONS = {
     "Germany": "Deutschland",
     "Austria": "Österreich",
     "Switzerland": "Schweiz",
+}
+
+ISO3_TO_ISO2_OVERRIDES = {
+    "XKX": "XK",
 }
 
 
@@ -129,11 +134,25 @@ def _translate_locality_name(locality, country_code):
 
 def _format_country(country, country_code):
     if country_code:
-        return country_code
+        return _to_iso2_country_code(country_code)
     cleaned_country = (country or "").strip()
     if not cleaned_country:
         return ""
     return COUNTRY_TRANSLATIONS.get(cleaned_country, cleaned_country)
+
+
+def _to_iso2_country_code(country_code):
+    """Normalize ORS alpha-2/alpha-3 country codes to ISO alpha-2."""
+    cleaned_code = str(country_code or "").strip().upper()
+    if len(cleaned_code) == 2:
+        return cleaned_code
+    if cleaned_code in ISO3_TO_ISO2_OVERRIDES:
+        return ISO3_TO_ISO2_OVERRIDES[cleaned_code]
+    if len(cleaned_code) == 3:
+        country = pycountry.countries.get(alpha_3=cleaned_code)
+        if country is not None:
+            return country.alpha_2
+    return cleaned_code
 
 
 def _looks_like_same_place(first, second):
